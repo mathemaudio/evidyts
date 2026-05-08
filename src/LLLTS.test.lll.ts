@@ -722,10 +722,15 @@ export class LLLTSTest {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
+		const originalLog = console.log
 		const originalError = console.error
 		const logLines: string[] = []
-		console.error = (...args: unknown[]) => {
+		const errorLines: string[] = []
+		console.log = (...args: unknown[]) => {
 			logLines.push(args.map(arg => String(arg)).join(" "))
+		}
+		console.error = (...args: unknown[]) => {
+			errorLines.push(args.map(arg => String(arg)).join(" "))
 		}
 
 		try {
@@ -767,6 +772,7 @@ export class LLLTSTest {
 				}
 			)
 		} finally {
+			console.log = originalLog
 			console.error = originalError
 		}
 
@@ -775,8 +781,20 @@ export class LLLTSTest {
 			"Navigation timeout should explain that no scenario had started yet"
 		)
 		assert(
-			logLines.some(line => line.includes("while running test src/App.test.lll.ts, scenario \"opens settings\"")),
+			logLines.some(line => line.includes("Last active target: test src/App.test.lll.ts, scenario \"opens settings\"")),
 			"Scenario timeout should include the active test and scenario"
+		)
+		assert(
+			logLines.some(line => line.includes("Testing took too long")),
+			"Tunnel timeout should use user-facing stuck-test wording"
+		)
+		assert(
+			logLines.filter(line => line.includes("Testing took too long")).length === 2,
+			"Each timeout diagnostic should be printed once by the grouped reporter"
+		)
+		assert(
+			!errorLines.some(line => line.includes("Testing took too long")),
+			"Tunnel timeout should not also print an immediate stderr copy"
 		)
 	}
 

@@ -130,6 +130,26 @@
       const relativeHostPath = `${normalizedTestPath.slice(0, lastSlashIndex + 1)}${hostClassName}.lll.ts`;
       return this.buildImportUrl(relativeHostPath, tParam, null);
     }
+    static describeMissingPairedHostImport(testPath, hostPath, hostModuleUrl, importError) {
+      const normalizedTestPath = String(testPath ?? "").replace(/^\/+/, "");
+      const normalizedHostPath = String(hostPath ?? "").replace(/^\/+/, "");
+      const normalizedHostModuleUrl = String(hostModuleUrl ?? "");
+      const importErrorMessage = this.errorMessage(importError);
+      const details = importErrorMessage.length > 0 ? ` Browser import error: ${importErrorMessage}` : "";
+      return `Test file '${normalizedTestPath}' does not have an accessible paired production companion at '${normalizedHostPath}'. LLLTS test files are companion tests for same-named production modules; the overlay imports that companion so behavioral tests can preview and exercise the production host class. Expected import URL: ${normalizedHostModuleUrl}.${details}`;
+    }
+    static isExpectedPairedHostImportFetchFailure(importError, hostPath, hostModuleUrl) {
+      const importErrorMessage = this.errorMessage(importError);
+      if (!this.isDynamicImportFetchFailureMessage(importErrorMessage)) {
+        return false;
+      }
+      const normalizedHostPath = String(hostPath ?? "").replace(/^\/+/, "");
+      const normalizedHostModuleUrl = String(hostModuleUrl ?? "");
+      return normalizedHostPath.length > 0 && importErrorMessage.includes(normalizedHostPath) || normalizedHostModuleUrl.length > 0 && importErrorMessage.includes(normalizedHostModuleUrl);
+    }
+    static isDynamicImportFetchFailure(importError) {
+      return this.isDynamicImportFetchFailureMessage(this.errorMessage(importError));
+    }
     static resolveTestClass(moduleObject) {
       if (!moduleObject || typeof moduleObject !== "object") {
         return null;
@@ -266,6 +286,15 @@
         return "<unstringifiable>";
       }
     }
+    static errorMessage(error) {
+      if (error && typeof error === "object" && "message" in error) {
+        return String(error.message ?? "");
+      }
+      return String(error ?? "");
+    }
+    static isDynamicImportFetchFailureMessage(message) {
+      return message.includes("Failed to fetch dynamically imported module") || message.includes("error loading dynamically imported module") || message.includes("Importing a module script failed");
+    }
     static describePrototypeChain(startPrototype) {
       const chain = [];
       let current = startPrototype;
@@ -349,7 +378,9 @@
     }
     static setFixedRunProgress(progress) {
       const globalScope = this.getGlobalScope();
-      globalScope[this.fixedRunProgressJsonKey] = progress && typeof progress === "object" ? progress : void 0;
+      const progressPayload = progress && typeof progress === "object" ? progress : void 0;
+      globalScope[this.fixedRunProgressJsonKey] = progressPayload;
+      this.notifyRunProgressBinding(globalScope, progressPayload);
     }
     static buildTerminalReport(testReports, allPassed) {
       const lines = [];
@@ -422,12 +453,21 @@
     static getGlobalScope() {
       return globalThis;
     }
+    static notifyRunProgressBinding(globalScope, progressPayload) {
+      const progressBinding = globalScope[this.fixedRunProgressBindingKey];
+      if (typeof progressBinding !== "function") {
+        return;
+      }
+      Promise.resolve(progressBinding(progressPayload)).catch(() => {
+      });
+    }
   };
   __publicField(OverlayReportRuntime, "testStatusEmojiPassed", "\u{1F7E2}");
   __publicField(OverlayReportRuntime, "testStatusEmojiFailed", "\u26D4\uFE0F");
   __publicField(OverlayReportRuntime, "fixedLastRunReportKey", "FIXED_llltsLastRunReport");
   __publicField(OverlayReportRuntime, "fixedLastRunReportJsonKey", "FIXED_llltsLastRunReportJson");
   __publicField(OverlayReportRuntime, "fixedRunProgressJsonKey", "FIXED_llltsRunProgressJson");
+  __publicField(OverlayReportRuntime, "fixedRunProgressBindingKey", "FIXED_llltsReportProgress");
 
   // src/server/overlay-runtime/OverlayScenarioRuntime.lll.ts
   var _OverlayScenarioRuntime = class _OverlayScenarioRuntime {
@@ -1114,6 +1154,7 @@
         const detectedT = OverlayModuleRuntime.detectPageModuleTParam();
         const testModuleUrl = OverlayModuleRuntime.buildImportUrl(selectedPath, detectedT, null);
         const hostModuleUrl = OverlayModuleRuntime.buildPairedHostImportUrl(testModuleUrl, selectedPath, detectedT, null);
+        const hostModulePath = OverlayModuleRuntime.resolveHostPathFromTestPath(selectedPath);
         this.debug("loadTestPreview:resolved urls", {
           selectedPath,
           detectedT,
@@ -1122,22 +1163,39 @@
           hostModuleUrl
         });
         this.setStatus(`Importing ${testModuleUrl}`, false);
-        const loadedModules = await this.runWithTimeout(
-          () => Promise.all([
-            import(testModuleUrl),
-            import(hostModuleUrl)
-          ]),
-          runContext.stepTimeoutMs,
-          `Test setup for ${selectedPath} timed out after ${String(runContext.stepTimeoutMs)}ms while importing modules.`
-        );
+        let moduleObject;
+        try {
+          moduleObject = await this.runWithTimeout(
+            () => import(testModuleUrl),
+            runContext.stepTimeoutMs,
+            `Test setup for ${selectedPath} timed out after ${String(runContext.stepTimeoutMs)}ms while importing test module.`
+          );
+        } catch (testImportError) {
+          if (OverlayModuleRuntime.isExpectedPairedHostImportFetchFailure(testImportError, hostModulePath, hostModuleUrl)) {
+            throw new Error(OverlayModuleRuntime.describeMissingPairedHostImport(selectedPath, hostModulePath, hostModuleUrl, testImportError));
+          }
+          throw testImportError;
+        }
+        this.setStatus(`Importing ${hostModuleUrl}`, false);
+        let hostModuleObject;
+        try {
+          hostModuleObject = await this.runWithTimeout(
+            () => import(hostModuleUrl),
+            runContext.stepTimeoutMs,
+            `Test setup for ${selectedPath} timed out after ${String(runContext.stepTimeoutMs)}ms while importing paired production companion ${hostModulePath}.`
+          );
+        } catch (hostImportError) {
+          if (OverlayModuleRuntime.isDynamicImportFetchFailure(hostImportError)) {
+            throw new Error(OverlayModuleRuntime.describeMissingPairedHostImport(selectedPath, hostModulePath, hostModuleUrl, hostImportError));
+          }
+          throw hostImportError;
+        }
         if (runContext.loadToken !== this.loadTokenCounter) {
           return {
             status: "stale",
             scenarioResults: []
           };
         }
-        const moduleObject = loadedModules[0];
-        const hostModuleObject = loadedModules[1];
         this.debug("loadTestPreview:modules imported", {
           testExports: Object.keys(moduleObject),
           hostExports: Object.keys(hostModuleObject)

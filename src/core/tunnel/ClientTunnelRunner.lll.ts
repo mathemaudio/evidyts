@@ -9,6 +9,9 @@ import type { ClientTunnelRunResult } from "./ClientTunnelRunResult"
 
 @Spec("Runs behavioral scenarios through the overlay UI using a Playwright browser tunnel.")
 export class ClientTunnelRunner {
+	private static readonly progressBindingName = "FIXED_llltsReportProgress"
+	private static readonly progressReadTimeoutMs = 250
+
 	constructor(
 		private readonly loadPlaywright: () => typeof import("playwright") = () => require("playwright") as typeof import("playwright"),
 		private readonly installChromium: () => Promise<void> = async () => this.installChromiumWithPlaywrightCli()
@@ -24,6 +27,7 @@ export class ClientTunnelRunner {
 		let context: BrowserContext | null = null
 		let page: Page | null = null
 		let timeoutPhase: NonNullable<NonNullable<ClientTunnelRunResult["timeoutContext"]>["phase"]> = "navigation"
+		let lastProgressContext: ClientTunnelRunResult["timeoutContext"] = undefined
 		try {
 			const playwright = this.loadPlaywright()
 			if (!playwright.chromium || typeof playwright.chromium.launch !== "function") {
@@ -41,6 +45,9 @@ export class ClientTunnelRunner {
 			const contextInstance = await browserInstance.newContext()
 			context = contextInstance
 			page = await contextInstance.newPage()
+			await this.exposeProgressBinding(page, progressContext => {
+				lastProgressContext = progressContext
+			})
 			const automaticUrl = this.buildAutomaticTunnelUrl(input.url, this.resolvePerStepTimeoutMs(input.timeoutMs))
 			this.attachConsoleErrorListeners(page, consoleErrors, () => currentPhase)
 
@@ -86,7 +93,7 @@ export class ClientTunnelRunner {
 			}
 		} catch (error) {
 			const timeoutContext = this.isTimeoutError(error)
-				? await this.readTimeoutContext(page, timeoutPhase)
+				? await this.readTimeoutContext(page, timeoutPhase, lastProgressContext)
 				: undefined
 			return this.mapRuntimeError(error, timeoutContext)
 		} finally {
@@ -95,32 +102,86 @@ export class ClientTunnelRunner {
 		}
 	}
 
+	@Spec("Receives browser-side test progress from the overlay before a stuck page can block evaluate calls.")
+	private async exposeProgressBinding(
+		page: Page,
+		onProgress: (context: NonNullable<ClientTunnelRunResult["timeoutContext"]>) => void
+	): Promise<void> {
+		await page.exposeBinding(ClientTunnelRunner.progressBindingName, (_source: unknown, rawProgress: unknown) => {
+			onProgress(this.normalizeTimeoutContext(rawProgress, "scenario"))
+		})
+	}
+
 	@Spec("Reads overlay progress so timeout messages can identify the active test or scenario.")
 	private async readTimeoutContext(
 		page: Page | null,
-		timeoutPhase: NonNullable<NonNullable<ClientTunnelRunResult["timeoutContext"]>["phase"]>
+		timeoutPhase: NonNullable<NonNullable<ClientTunnelRunResult["timeoutContext"]>["phase"]>,
+		lastProgressContext?: ClientTunnelRunResult["timeoutContext"]
 	): Promise<ClientTunnelRunResult["timeoutContext"]> {
-		const context: NonNullable<ClientTunnelRunResult["timeoutContext"]> = { phase: timeoutPhase }
+		const fallbackContext = timeoutPhase === "scenario" && lastProgressContext?.phase === "scenario"
+			? lastProgressContext
+			: { phase: timeoutPhase }
 		if (page === null || timeoutPhase !== "scenario") {
-			return context
+			return fallbackContext
+		}
+		if (lastProgressContext?.phase === "scenario" && this.hasTimeoutTarget(lastProgressContext)) {
+			return lastProgressContext
 		}
 		try {
-			const raw = await page.evaluate(
-				() => (globalThis as typeof globalThis & { FIXED_llltsRunProgressJson?: unknown }).FIXED_llltsRunProgressJson
+			const raw = await this.withTimeout(
+				page.evaluate(
+					() => (globalThis as typeof globalThis & { FIXED_llltsRunProgressJson?: unknown }).FIXED_llltsRunProgressJson
+				),
+				ClientTunnelRunner.progressReadTimeoutMs,
+				"Timed out while reading browser progress."
 			)
-			if (!raw || typeof raw !== "object") {
-				return context
-			}
-			const record = raw as Record<string, unknown>
-			return {
-				phase: timeoutPhase,
-				testPath: typeof record.testPath === "string" && record.testPath.length > 0 ? record.testPath : undefined,
-				scenarioName: typeof record.scenarioName === "string" && record.scenarioName.length > 0 ? record.scenarioName : undefined,
-				scenarioMethodName: typeof record.scenarioMethodName === "string" && record.scenarioMethodName.length > 0 ? record.scenarioMethodName : undefined
-			}
+			return this.normalizeTimeoutContext(raw, timeoutPhase)
 		} catch {
+			return fallbackContext
+		}
+	}
+
+	@Spec("Normalizes overlay progress into the timeout context shape used by compiler diagnostics.")
+	private normalizeTimeoutContext(
+		raw: unknown,
+		timeoutPhase: NonNullable<NonNullable<ClientTunnelRunResult["timeoutContext"]>["phase"]>
+	): NonNullable<ClientTunnelRunResult["timeoutContext"]> {
+		const context: NonNullable<ClientTunnelRunResult["timeoutContext"]> = { phase: timeoutPhase }
+		if (!raw || typeof raw !== "object") {
 			return context
 		}
+		const record = raw as Record<string, unknown>
+		const testPath = this.nonEmptyString(record.testPath)
+		const scenarioName = this.nonEmptyString(record.scenarioName)
+		const scenarioMethodName = this.nonEmptyString(record.scenarioMethodName)
+		if (testPath !== undefined) {
+			context.testPath = testPath
+		}
+		if (scenarioName !== undefined) {
+			context.scenarioName = scenarioName
+		}
+		if (scenarioMethodName !== undefined) {
+			context.scenarioMethodName = scenarioMethodName
+		}
+		return context
+	}
+
+	@Spec("Returns true when timeout context identifies at least one concrete execution target.")
+	private hasTimeoutTarget(context: NonNullable<ClientTunnelRunResult["timeoutContext"]>): boolean {
+		return (
+			typeof context.testPath === "string" && context.testPath.length > 0
+			|| typeof context.scenarioName === "string" && context.scenarioName.length > 0
+			|| typeof context.scenarioMethodName === "string" && context.scenarioMethodName.length > 0
+		)
+	}
+
+	@Spec("Returns trimmed strings for optional progress fields.")
+	private nonEmptyString(value: unknown): string | undefined {
+		if (typeof value !== "string") {
+			return undefined
+		}
+		const trimmed = value.trim()
+		return trimmed.length > 0 ? trimmed : undefined
 	}
 
 	@Spec("Attaches browser listeners that capture runtime errors with phase metadata.")
@@ -486,6 +547,25 @@ export class ClientTunnelRunner {
 			await target.close()
 		} catch {
 			// Ignore close failures from teardown paths.
+		}
+	}
+
+	@Spec("Bounds an auxiliary promise so diagnostic collection cannot hang after the main timeout fires.")
+	private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+		let timeoutHandle: NodeJS.Timeout | null = null
+		try {
+			return await Promise.race([
+				promise,
+				new Promise<T>((_resolve, reject) => {
+					timeoutHandle = setTimeout(() => {
+						reject(new Error(timeoutMessage))
+					}, timeoutMs)
+				})
+			])
+		} finally {
+			if (timeoutHandle !== null) {
+				clearTimeout(timeoutHandle)
+			}
 		}
 	}
 }

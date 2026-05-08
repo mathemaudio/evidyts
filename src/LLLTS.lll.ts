@@ -362,7 +362,10 @@ export class LLLTS {
 
 	@Spec("Formats timeout diagnostics with explicit execution phase and active target when known.")
 	private static formatClientTunnelTimeoutMessage(result: ClientTunnelRunResult): string {
-		const details: string[] = ["Client tunnel timed out while waiting for FIXED_llltsLastRunReport."]
+		const details: string[] = [
+			"Testing took too long, so LLLTS stopped waiting for the browser run.",
+			"A scenario, render cycle, import, or app event handler may be stuck in an infinite loop."
+		]
 		const timeoutContext = result.timeoutContext
 		if (timeoutContext?.phase === "navigation") {
 			details.push("Timeout happened before any scenario started, while navigating to the automatic tunnel page.")
@@ -377,7 +380,7 @@ export class LLLTS {
 				targetParts.push(`scenario method ${timeoutContext.scenarioMethodName}`)
 			}
 			if (targetParts.length > 0) {
-				details.push(`Timeout happened while running ${targetParts.join(", ")}.`)
+				details.push(`Last active target: ${targetParts.join(", ")}.`)
 			} else {
 				details.push("Timeout happened after the tunnel entered scenario execution.")
 			}
@@ -522,11 +525,10 @@ export class LLLTS {
 		}
 
 		if (result.status === "timeout") {
-			console.error(`\n❌ ${this.formatClientTunnelTimeoutMessage(result)}`)
 			return
 		}
 
-		console.error(`\n❌ Client tunnel runtime error: ${result.message ?? "No additional details."}`)
+		return
 	}
 }
 

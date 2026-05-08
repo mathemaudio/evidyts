@@ -6,6 +6,8 @@ export type FakeRunnerOptions = {
 	reportText?: string
 	reportJson?: unknown
 	timeoutProgressJson?: unknown
+	progressBindingPayload?: unknown
+	hangTimeoutProgressRead?: boolean
 	gotoError?: Error
 	waitError?: Error
 	launchError?: Error

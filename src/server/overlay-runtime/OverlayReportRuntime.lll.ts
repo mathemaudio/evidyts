@@ -17,6 +17,7 @@ export class OverlayReportRuntime {
 	private static readonly fixedLastRunReportKey = "FIXED_llltsLastRunReport"
 	private static readonly fixedLastRunReportJsonKey = "FIXED_llltsLastRunReportJson"
 	private static readonly fixedRunProgressJsonKey = "FIXED_llltsRunProgressJson"
+	private static readonly fixedRunProgressBindingKey = "FIXED_llltsReportProgress"
 
 	public static clearFixedLastRunReport(): void {
 		const globalScope = this.getGlobalScope()
@@ -37,7 +38,9 @@ export class OverlayReportRuntime {
 
 	public static setFixedRunProgress(progress: unknown): void {
 		const globalScope = this.getGlobalScope()
-		globalScope[this.fixedRunProgressJsonKey] = progress && typeof progress === "object" ? progress : undefined
+		const progressPayload = progress && typeof progress === "object" ? progress : undefined
+		globalScope[this.fixedRunProgressJsonKey] = progressPayload
+		this.notifyRunProgressBinding(globalScope, progressPayload)
 	}
 
 	public static buildTerminalReport(testReports: OverlayTestReport[], allPassed: boolean): string {
@@ -112,5 +115,15 @@ export class OverlayReportRuntime {
 
 	private static getGlobalScope(): typeof globalThis & Record<string, unknown> {
 		return globalThis as typeof globalThis & Record<string, unknown>
+	}
+
+	private static notifyRunProgressBinding(globalScope: typeof globalThis & Record<string, unknown>, progressPayload: unknown): void {
+		const progressBinding = globalScope[this.fixedRunProgressBindingKey]
+		if (typeof progressBinding !== "function") {
+			return
+		}
+		Promise.resolve(progressBinding(progressPayload)).catch(() => {
+			// Progress reporting is best-effort; the fixed global value remains the fallback.
+		})
 	}
 }

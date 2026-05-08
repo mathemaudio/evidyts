@@ -9,4 +9,5 @@ export type FakeRunnerState = {
 	browserClosedCount: number
 	visitedUrl?: string
 	waitForFunctionCallCount?: number
+	exposedBindingNames?: string[]
 }

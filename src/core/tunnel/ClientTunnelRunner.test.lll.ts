@@ -19,10 +19,12 @@ export class ClientTunnelRunnerTest {
 			contextClosedCount: 0,
 			browserClosedCount: 0,
 			visitedUrl: "",
-			waitForFunctionCallCount: 0
+			waitForFunctionCallCount: 0,
+			exposedBindingNames: []
 		}
 
 		let evaluateCount = 0
+		const exposedBindings: Record<string, (payload: unknown) => Promise<void>> = {}
 		const pageErrorListeners: Array<(error: unknown) => void> = []
 		const consoleListeners: Array<(message: unknown) => void> = []
 		const emitPageError = (error: NonNullable<ClientTunnelRunResult["consoleErrors"]>[number]): void => {
@@ -62,6 +64,12 @@ export class ClientTunnelRunnerTest {
 			}
 		}
 		const page = {
+			exposeBinding: async function exposeBinding(name: string, callback: (source: unknown, payload: unknown) => unknown): Promise<void> {
+				state.exposedBindingNames?.push(name)
+				exposedBindings[name] = async (payload: unknown): Promise<void> => {
+					await callback({ page }, payload)
+				}
+			},
 			on: function on(eventName: string, listener: (...args: unknown[]) => void) {
 				if (eventName === "pageerror") {
 					pageErrorListeners.push(listener as (error: unknown) => void)
@@ -87,12 +95,18 @@ export class ClientTunnelRunnerTest {
 			): Promise<void> {
 				state.waitForFunctionCallCount = (state.waitForFunctionCallCount ?? 0) + 1
 				if (options.waitError !== undefined) {
+					if (options.progressBindingPayload !== undefined) {
+						await exposedBindings.FIXED_llltsReportProgress?.(options.progressBindingPayload)
+					}
 					throw options.waitError
 				}
 				emitConfiguredEvents(options.scenarioConsoleErrors)
 			},
 			evaluate: async function evaluate<T>(_fn: Parameters<Page["evaluate"]>[0]): Promise<T> {
 				evaluateCount++
+				if (options.waitError !== undefined && evaluateCount === 1 && options.hangTimeoutProgressRead === true) {
+					return await new Promise<T>(() => {})
+				}
 				if (options.waitError !== undefined && evaluateCount === 1 && options.timeoutProgressJson !== undefined) {
 					return options.timeoutProgressJson as T
 				}
@@ -209,6 +223,51 @@ export class ClientTunnelRunnerTest {
 		assert(result.timeoutContext?.testPath === "src/App.test.lll.ts", "Timeout should retain active test path")
 		assert(result.timeoutContext?.scenarioName === "opens settings", "Timeout should retain active scenario title")
 		assert(result.timeoutContext?.scenarioMethodName === "opensSettings", "Timeout should retain active scenario method")
+	}
+
+	@Scenario("Uses pushed progress when a stuck page cannot answer evaluate")
+	static async usesPushedProgressWhenTimeoutPageIsWedged(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+		const input = scenario.input
+		const assert: AssertFn = scenario.assert
+		const waitFor: WaitForFn = scenario.waitFor
+		const timeoutError = new Error("wait timed out")
+		timeoutError.name = "TimeoutError"
+		const fixture = this.createRunner({
+			waitError: timeoutError,
+			progressBindingPayload: {
+				testPath: "src/Stuck.test.lll.ts",
+				scenarioName: "locks the tab",
+				scenarioMethodName: "locksTheTab"
+			},
+			hangTimeoutProgressRead: true
+		})
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500 })
+		assert(result.status === "timeout", "Expected timeout status")
+		assert(
+			fixture.state.exposedBindingNames?.includes("FIXED_llltsReportProgress") === true,
+			"Runner should expose browser-to-node progress binding"
+		)
+		assert(result.timeoutContext?.testPath === "src/Stuck.test.lll.ts", "Timeout should use pushed test path")
+		assert(result.timeoutContext?.scenarioName === "locks the tab", "Timeout should use pushed scenario title")
+		assert(result.timeoutContext?.scenarioMethodName === "locksTheTab", "Timeout should use pushed scenario method")
+	}
+
+	@Scenario("Does not hang when timeout progress cannot be read from the browser")
+	static async returnsTimeoutWhenProgressReadHangs(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+		const input = scenario.input
+		const assert: AssertFn = scenario.assert
+		const waitFor: WaitForFn = scenario.waitFor
+		const timeoutError = new Error("wait timed out")
+		timeoutError.name = "TimeoutError"
+		const fixture = this.createRunner({
+			waitError: timeoutError,
+			hangTimeoutProgressRead: true
+		})
+		const startedAt = Date.now()
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500 })
+		assert(result.status === "timeout", "Expected timeout status")
+		assert(result.timeoutContext?.phase === "scenario", "Timeout should still be labeled as scenario phase")
+		assert(Date.now() - startedAt < 1000, "Progress read fallback should not hang the tunnel runner")
 	}
 
 	@Scenario("Labels navigation timeout before any scenario starts")

@@ -6,6 +6,7 @@ import packageJson from "../../package.json"
 import { AssertFn, Scenario, Spec, WaitForFn, ScenarioParameter, SubjectFactory } from "../public/lll.lll.js"
 import "./LlltsServer.lll"
 import { LlltsServer } from "./LlltsServer.lll.js"
+import { OverlayModuleRuntime } from "./overlay-runtime/OverlayModuleRuntime.lll.js"
 import type { ServerConfig } from "./ServerConfig"
 
 @Spec("Unit scenarios for LlltsServer proxying, runtime checks, and injected test overlay behavior.")
@@ -280,6 +281,27 @@ export class LlltsServerTest {
 			await upstream.close()
 			fs.rmSync(tempRoot, { recursive: true, force: true })
 		}
+	}
+
+	@Scenario("Overlay missing paired host diagnostic names the companion path")
+	static async overlayMissingPairedHostDiagnosticNamesCompanionPath(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const input = scenario.input
+		const assert: AssertFn = scenario.assert
+		const waitFor: WaitForFn = scenario.waitFor
+		const testPath = "src/IndexHtmlZoom.test.lll.ts"
+		const hostPath = "src/IndexHtmlZoom.lll.ts"
+		const hostModuleUrl = "/src/IndexHtmlZoom.lll.ts"
+		const importError = new Error("Failed to fetch dynamically imported module: http://localhost:27453/src/IndexHtmlZoom.lll.ts")
+
+		assert(
+			OverlayModuleRuntime.isExpectedPairedHostImportFetchFailure(importError, hostPath, hostModuleUrl),
+			"Dynamic import fetch failures for the expected host path should be classified as missing paired hosts"
+		)
+
+		const message = OverlayModuleRuntime.describeMissingPairedHostImport(testPath, hostPath, hostModuleUrl, importError)
+		assert(message.includes(`Test file '${testPath}' does not have an accessible paired production companion`), "Diagnostic should name the failing test file")
+		assert(message.includes(`'${hostPath}'`), "Diagnostic should name the expected companion path")
+		assert(message.includes("behavioral tests can preview and exercise the production host class"), "Diagnostic should explain why the companion is imported")
 	}
 
 	@Scenario("Reachable upstream non-HTML content is forwarded without overlay injection")

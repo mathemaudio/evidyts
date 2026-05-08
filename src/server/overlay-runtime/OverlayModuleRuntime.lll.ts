@@ -147,6 +147,30 @@ export class OverlayModuleRuntime {
 		return this.buildImportUrl(relativeHostPath, tParam, null)
 	}
 
+	public static describeMissingPairedHostImport(testPath: unknown, hostPath: unknown, hostModuleUrl: unknown, importError: unknown): string {
+		const normalizedTestPath = String(testPath ?? "").replace(/^\/+/, "")
+		const normalizedHostPath = String(hostPath ?? "").replace(/^\/+/, "")
+		const normalizedHostModuleUrl = String(hostModuleUrl ?? "")
+		const importErrorMessage = this.errorMessage(importError)
+		const details = importErrorMessage.length > 0 ? ` Browser import error: ${importErrorMessage}` : ""
+		return `Test file '${normalizedTestPath}' does not have an accessible paired production companion at '${normalizedHostPath}'. LLLTS test files are companion tests for same-named production modules; the overlay imports that companion so behavioral tests can preview and exercise the production host class. Expected import URL: ${normalizedHostModuleUrl}.${details}`
+	}
+
+	public static isExpectedPairedHostImportFetchFailure(importError: unknown, hostPath: unknown, hostModuleUrl: unknown): boolean {
+		const importErrorMessage = this.errorMessage(importError)
+		if (!this.isDynamicImportFetchFailureMessage(importErrorMessage)) {
+			return false
+		}
+		const normalizedHostPath = String(hostPath ?? "").replace(/^\/+/, "")
+		const normalizedHostModuleUrl = String(hostModuleUrl ?? "")
+		return normalizedHostPath.length > 0 && importErrorMessage.includes(normalizedHostPath)
+			|| normalizedHostModuleUrl.length > 0 && importErrorMessage.includes(normalizedHostModuleUrl)
+	}
+
+	public static isDynamicImportFetchFailure(importError: unknown): boolean {
+		return this.isDynamicImportFetchFailureMessage(this.errorMessage(importError))
+	}
+
 	public static resolveTestClass(moduleObject: Record<string, unknown> | null): ((...args: unknown[]) => unknown) | null {
 		if (!moduleObject || typeof moduleObject !== "object") {
 			return null
@@ -299,6 +323,19 @@ export class OverlayModuleRuntime {
 		} catch {
 			return "<unstringifiable>"
 		}
+	}
+
+	private static errorMessage(error: unknown): string {
+		if (error && typeof error === "object" && "message" in error) {
+			return String((error as { message?: unknown }).message ?? "")
+		}
+		return String(error ?? "")
+	}
+
+	private static isDynamicImportFetchFailureMessage(message: string): boolean {
+		return message.includes("Failed to fetch dynamically imported module")
+			|| message.includes("error loading dynamically imported module")
+			|| message.includes("Importing a module script failed")
 	}
 
 	private static describePrototypeChain(startPrototype: unknown): string[] {

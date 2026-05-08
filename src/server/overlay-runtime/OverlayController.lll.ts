@@ -564,6 +564,7 @@ export class OverlayController {
 			const detectedT = OverlayModuleRuntime.detectPageModuleTParam()
 			const testModuleUrl = OverlayModuleRuntime.buildImportUrl(selectedPath, detectedT, null)
 			const hostModuleUrl = OverlayModuleRuntime.buildPairedHostImportUrl(testModuleUrl, selectedPath, detectedT, null)
+			const hostModulePath = OverlayModuleRuntime.resolveHostPathFromTestPath(selectedPath)
 			this.debug("loadTestPreview:resolved urls", {
 				selectedPath,
 				detectedT,
@@ -572,22 +573,39 @@ export class OverlayController {
 				hostModuleUrl
 			})
 			this.setStatus(`Importing ${testModuleUrl}`, false)
-			const loadedModules = await this.runWithTimeout(
-				() => Promise.all([
-					import(testModuleUrl),
-					import(hostModuleUrl)
-				]),
-				runContext.stepTimeoutMs,
-				`Test setup for ${selectedPath} timed out after ${String(runContext.stepTimeoutMs)}ms while importing modules.`
-			)
+			let moduleObject: Record<string, unknown>
+			try {
+				moduleObject = await this.runWithTimeout(
+					() => import(testModuleUrl) as Promise<Record<string, unknown>>,
+					runContext.stepTimeoutMs,
+					`Test setup for ${selectedPath} timed out after ${String(runContext.stepTimeoutMs)}ms while importing test module.`
+				)
+			} catch (testImportError) {
+				if (OverlayModuleRuntime.isExpectedPairedHostImportFetchFailure(testImportError, hostModulePath, hostModuleUrl)) {
+					throw new Error(OverlayModuleRuntime.describeMissingPairedHostImport(selectedPath, hostModulePath, hostModuleUrl, testImportError))
+				}
+				throw testImportError
+			}
+			this.setStatus(`Importing ${hostModuleUrl}`, false)
+			let hostModuleObject: Record<string, unknown>
+			try {
+				hostModuleObject = await this.runWithTimeout(
+					() => import(hostModuleUrl) as Promise<Record<string, unknown>>,
+					runContext.stepTimeoutMs,
+					`Test setup for ${selectedPath} timed out after ${String(runContext.stepTimeoutMs)}ms while importing paired production companion ${hostModulePath}.`
+				)
+			} catch (hostImportError) {
+				if (OverlayModuleRuntime.isDynamicImportFetchFailure(hostImportError)) {
+					throw new Error(OverlayModuleRuntime.describeMissingPairedHostImport(selectedPath, hostModulePath, hostModuleUrl, hostImportError))
+				}
+				throw hostImportError
+			}
 			if (runContext.loadToken !== this.loadTokenCounter) {
 				return {
 					status: "stale",
 					scenarioResults: []
 				}
 			}
-			const moduleObject = loadedModules[0] as Record<string, unknown>
-			const hostModuleObject = loadedModules[1] as Record<string, unknown>
 			this.debug("loadTestPreview:modules imported", {
 				testExports: Object.keys(moduleObject),
 				hostExports: Object.keys(hostModuleObject)
