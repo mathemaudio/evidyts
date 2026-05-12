@@ -7,6 +7,8 @@ easy to forget into deterministic compiler pressure: visible specs, predictable 
 tests, browser-verified behavior, and hard limits that keep projects from turning into a cleanup
 project after the first demo.
 
+[Evidype](https://evidype.com/) is the VS Code AI coding agent.
+
 ## Why This Exists
 
 AI can generate code quickly. That is useful, but speed alone does not keep a system coherent.
