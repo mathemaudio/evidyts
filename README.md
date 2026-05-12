@@ -7,8 +7,6 @@ easy to forget into deterministic compiler pressure: visible specs, predictable 
 tests, browser-verified behavior, and hard limits that keep projects from turning into a cleanup
 project after the first demo.
 
-LLL stands for **Large Language Language**. EvidyTS is the TypeScript member of that family.
-
 Evidype is the VS Code AI coding agent. EvidyTS is the stricter TypeScript compiler/dialect behind
 Evidype, and Evidype targets EvidyTS inside VS Code.
 
