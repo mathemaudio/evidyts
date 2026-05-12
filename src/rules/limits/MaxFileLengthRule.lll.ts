@@ -5,8 +5,10 @@ import { Rule } from "../../core/rulesEngine/Rule"
 import { Spec } from "../../public/lll.lll"
 import { BreadthRuleLimits } from "./BreadthRuleLimits"
 
-@Spec("Enforces a maximum file length in lines for non-test LLLTS files.")
+@Spec("Enforces a maximum file length in lines for non-test EvidyTS files.")
 export class MaxFileLengthRule {
+	private static readonly MAX_DISPLAYED_EXTRACTION_CANDIDATES = 3
+
 	static get MAX_LINES(): number {
 		return BreadthRuleLimits.getConfig().maxFileLines
 	}
@@ -62,8 +64,14 @@ export class MaxFileLengthRule {
 		}
 
 		lines.push("Suggested move_members extraction candidates:")
-		for (const candidate of candidates) {
+		const visibleCandidates = candidates.slice(0, this.MAX_DISPLAYED_EXTRACTION_CANDIDATES)
+		for (const candidate of visibleCandidates) {
 			lines.push(`- ${candidate}`)
+		}
+		const hiddenCandidateCount = candidates.length - visibleCandidates.length
+		if (hiddenCandidateCount > 0) {
+			const suffix = hiddenCandidateCount === 1 ? "candidate" : "candidates"
+			lines.push(`... and ${hiddenCandidateCount} more ${suffix}.`)
 		}
 		lines.push("Prefer static members first; static properties and static methods are movable. For instance methods, move their member dependencies in the same batch or let move_members create a focused destination class.")
 		return lines.join("\n")
@@ -93,7 +101,6 @@ export class MaxFileLengthRule {
 
 		return candidates
 			.sort((left, right) => right.sortWeight - left.sortWeight || left.label.localeCompare(right.label))
-			.slice(0, 8)
 			.map(candidate => candidate.label)
 	}
 

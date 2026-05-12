@@ -25,7 +25,7 @@ links/
 llm-raw-stream.txt
 
 .lll/vendor/
-.lll/prompts/
+.lll/chats/
 
 
 .lll/snapshots

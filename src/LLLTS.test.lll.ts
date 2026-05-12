@@ -8,7 +8,7 @@ import type { ClientTunnelRunResult } from "./core/tunnel/ClientTunnelRunResult.
 import { AssertFn, Scenario, Spec, WaitForFn, ScenarioParameter } from "./public/lll.lll.js";
 import { LlltsServer } from "./server/LlltsServer.lll.js";
 
-@Spec("End-to-end scenarios for the LLLTS CLI.")
+@Spec("End-to-end scenarios for the EvidyTS CLI.")
 export class LLLTSTest {
 	testType = "unit"
 

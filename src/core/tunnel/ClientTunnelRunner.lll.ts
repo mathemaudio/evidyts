@@ -506,7 +506,7 @@ export class ClientTunnelRunner {
 		const detail = this.formatError(error)
 		const message = [
 			"Playwright Chromium was missing.",
-			"LLLTS attempted to install it automatically but Chromium is still unavailable.",
+			"EvidyTS attempted to install it automatically but Chromium is still unavailable.",
 			"If this keeps happening, the project environment is blocking the Playwright installer and needs maintainer attention."
 		].join(" ")
 		if (detail.length === 0) {

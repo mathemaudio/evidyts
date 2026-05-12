@@ -17,9 +17,9 @@ import { Spec } from "./public/lll.lll"
 import { LlltsServer } from "./server/LlltsServer.lll"
 // import { BadExample2 } from "./examples/intentionallyBadExampleTests/badExample2"
 
-@Spec("CLI entry that loads a LLLTS project, applies rules, and reports diagnostics.")
+@Spec("CLI entry that loads an EvidyTS project, applies rules, and reports diagnostics.")
 export class LLLTS {
-	@Spec("Reads CLI args and runs LLLTS checks on the target project.")
+	@Spec("Reads CLI args and runs EvidyTS checks on the target project.")
 	public static async main(args: string[]): Promise<MainResult> {
 		const serverModeResult = await this.tryRunServerMode(args)
 		if (serverModeResult !== null) {
@@ -39,7 +39,7 @@ export class LLLTS {
 		}
 		const clientTunnelConfig = clientTunnelConfigResult.config
 
-		console.log(`LLLTS Compiler ${packageJson.version}`)
+		console.log(`EvidyTS Compiler ${packageJson.version}`)
 		// console.log(`Project: ${projectPath}`)
 		console.log(`Entry: ${entryFile}`)
 
@@ -135,7 +135,7 @@ export class LLLTS {
 
 		const server = new LlltsServer()
 		const port = await server.start(portResult.port, configResult.config)
-		console.log(`LLLTS server listening on http://localhost:${port}`)
+		console.log(`EvidyTS server listening on http://localhost:${port}`)
 		return { mode: "server", port }
 	}
 
@@ -363,7 +363,7 @@ export class LLLTS {
 	@Spec("Formats timeout diagnostics with explicit execution phase and active target when known.")
 	private static formatClientTunnelTimeoutMessage(result: ClientTunnelRunResult): string {
 		const details: string[] = [
-			"Testing took too long, so LLLTS stopped waiting for the browser run.",
+			"Testing took too long, so EvidyTS stopped waiting for the browser run.",
 			"A scenario, render cycle, import, or app event handler may be stuck in an infinite loop."
 		]
 		const timeoutContext = result.timeoutContext

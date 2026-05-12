@@ -69,6 +69,8 @@ ${fillerLines}
 		assert(message.includes("static method LargeFile.extractStatic"), "Expected static method candidate")
 		assert(message.includes("static property LargeFile.cachedValue"), "Expected static property candidate")
 		assert(message.includes("instance method LargeFile.extractInstance"), "Expected instance method candidate")
+		assert(message.includes("... and 1 more candidate."), "Expected hidden candidate count")
+		assert(!message.includes("instance method LargeFile.value"), "Expected diagnostic to show only three candidates")
 		assert(message.includes("Prefer static members first"), "Expected static-member-first guidance")
 		assert(message.includes("static properties and static methods are movable"), "Expected static property move guidance")
 	}

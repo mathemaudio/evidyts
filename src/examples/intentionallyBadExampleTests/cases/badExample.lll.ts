@@ -1,10 +1,10 @@
-// This file intentionally violates LLLTS rules to demonstrate the compiler's behavior.
+// This file intentionally violates EvidyTS rules to demonstrate the compiler's behavior.
 // We should not delete it; it should remain for tests to ensure that when we run our compiler, it produces predictable errors as expected.
 
 
 export class BadExample_WrongTitleClass {
 	public doSomething() {
-		console.log("This violates LLLTS rules")
+		console.log("This violates EvidyTS rules")
 	}
 }
 

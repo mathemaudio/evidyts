@@ -1,13 +1,16 @@
-# LLLTS
+# EvidyTS
 
-LLLTS is a stricter TypeScript dialect for AI-generated software.
+EvidyTS is a stricter TypeScript dialect for AI-generated software.
 
 It keeps the syntax large language models already know, then moves the parts of engineering that are
 easy to forget into deterministic compiler pressure: visible specs, predictable structure, companion
 tests, browser-verified behavior, and hard limits that keep projects from turning into a cleanup
 project after the first demo.
 
-LLL stands for **Large Language Language**. LLLTS is the TypeScript member of that family.
+LLL stands for **Large Language Language**. EvidyTS is the TypeScript member of that family.
+
+Evidype is the VS Code AI coding agent. EvidyTS is the stricter TypeScript compiler/dialect behind
+Evidype, and Evidype targets EvidyTS inside VS Code.
 
 ## Why This Exists
 
@@ -16,9 +19,9 @@ Ordinary TypeScript gives the model many places to hide complexity: loose top-le
 oversized files, ambiguous truthiness, missing return contracts, weak test pressure, and duplicated
 concepts spread across a growing project.
 
-LLLTS makes those habits harder.
+EvidyTS makes those habits harder.
 
-The goal is not novelty. Every valid LLLTS file is still valid TypeScript. The goal is familiar
+The goal is not novelty. Every valid EvidyTS file is still valid TypeScript. The goal is familiar
 syntax with stricter defaults, so the model spends less attention choosing between equivalent
 patterns and more attention on structure, behavior, and tests.
 
@@ -26,7 +29,7 @@ patterns and more attention on structure, behavior, and tests.
 
 > Make the shape of the program obvious before anyone reads the implementation.
 
-LLLTS turns common review expectations into language rules:
+EvidyTS turns common review expectations into language rules:
 
 - One primary concept per file.
 - The exported class or type must match the filename.
@@ -42,7 +45,7 @@ This is especially useful when the main code producer is an AI system. Humans di
 because they have to type every line. Models do not mind generating the extra structure reliability
 demands.
 
-## What LLLTS Enforces
+## What EvidyTS Enforces
 
 ### Predictable Structure
 
@@ -88,7 +91,7 @@ export class CheckoutCalculator {
 
 ### Guardrails Against Ambiguity
 
-LLLTS rejects shortcuts that are compact but easy to misread:
+EvidyTS rejects shortcuts that are compact but easy to misread:
 
 - assignment inside conditions
 - non-boolean truthiness checks
@@ -117,7 +120,7 @@ if (userName !== '') {
 ```
 
 Boolean positions are for booleans. Numeric operations are for numbers. If a reader can reasonably
-misread intent, LLLTS asks the code to say more.
+misread intent, EvidyTS asks the code to say more.
 
 ### Companion Tests
 
@@ -153,7 +156,7 @@ compiler can run them through the overlay.
 
 ### Coverage Debt
 
-LLLTS computes coverage over primary classes. A class currently counts as covered when it has a
+EvidyTS computes coverage over primary classes. A class currently counts as covered when it has a
 valid companion with at least one static `@Scenario`.
 
 Coverage debt is reported as the project grows. At lower levels it is visible pressure. At the
@@ -165,7 +168,7 @@ quiet until the project is already hard to repair.
 Fail-safe mode is the higher-assurance path:
 
 ```bash
-lllts --project tsconfig.json --entry src/App.lll.ts --fail-safe
+evidyts --project tsconfig.json --entry src/App.lll.ts --fail-safe
 ```
 
 Today it changes test enforcement:
@@ -192,7 +195,7 @@ From this repository:
 ```bash
 pnpm install
 pnpm run build
-pnpm exec lllts --project tsconfig.json --entry src/App.lll.ts
+pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts
 ```
 
 Run the package checks:
@@ -204,17 +207,18 @@ pnpm run lll-check
 Common options:
 
 ```bash
-pnpm exec lllts --project tsconfig.json --entry src/App.lll.ts --verbose
-pnpm exec lllts --project tsconfig.json --entry src/App.lll.ts --noTests
-pnpm exec lllts --project tsconfig.json --entry src/App.lll.ts --fail-safe
-pnpm exec lllts --project tsconfig.json --entry src/App.lll.ts --clientTunnel http://localhost:54300
-pnpm exec lllts --project tsconfig.json --entry src/App.lll.ts --clientTunnel http://localhost:54300 --clientTunnelHeaded
+pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --verbose
+pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --noTests
+pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --fail-safe
+pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --clientTunnel http://localhost:54300
+pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --clientTunnel http://localhost:54300 --clientTunnelHeaded
 ```
 
 The package also exposes:
 
-- `lllts` for compile/check mode
-- `lllts-server` for the local overlay server used by behavioral browser execution
+- `evidyts` for compile/check mode
+- `evidyts --server start` for the local overlay server used by behavioral browser execution
+- `lllts` as a legacy compatibility alias
 
 For local development in this repository:
 
@@ -226,7 +230,7 @@ pnpm run lll-example-check-quick
 
 ## Project Status
 
-LLLTS is early, practical tooling. It is already self-hosted: the compiler is written in the same
+EvidyTS is early, practical tooling. It is already self-hosted: the compiler is written in the same
 dialect it enforces. That matters because the rules are not just a manifesto about AI coding
 discipline; they are exercised daily by the compiler codebase itself.
 

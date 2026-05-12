@@ -63,5 +63,5 @@ export class OverlayRuntimeBootstrap {
 }
 
 void OverlayRuntimeBootstrap.start().catch((error: unknown) => {
-	console.error("[LLLTS overlay] Failed to initialize overlay.", error)
+	console.error("[EvidyTS overlay] Failed to initialize overlay.", error)
 })

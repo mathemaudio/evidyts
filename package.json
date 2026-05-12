@@ -1,23 +1,23 @@
 {
 	"name": "lllts",
-	"version": "0.1.35",
-	"description": "LLLTS: A self-testing, LLM-friendly language built on TypeScript",
+	"version": "0.1.37",
+	"description": "EvidyTS: the stricter TypeScript compiler/dialect behind Evidype",
 	"license": "GPL-3.0-or-later",
 	"main": "dist/LLLTS.bundle.cjs",
 	"bin": {
-		"lllts": "./bin/lllts",
-		"lllts-server": "./bin/lllts-server"
+		"evidyts": "./bin/evidyts",
+		"lllts": "./bin/lllts"
 	},
 	"type": "commonjs",
 	"scripts": {
 		"watch": "node scripts/watch.mjs",
 		"watch:overlay-runtime": "node scripts/build-overlay-runtime.mjs --watch",
-		"lll-check": "tsc && ./bin/lllts --project tsconfig.json --entry src/LLLTS.lll.ts --noEmit",
-		"lll-check-no-tests": "tsc && ./bin/lllts --project tsconfig.json --entry src/LLLTS.lll.ts --noTests",
-		"lll-check-verbose": "tsc && ./bin/lllts --project tsconfig.json --entry src/LLLTS.lll.ts --verbose",
-		"lll-example-check-quick": "tsc && ./bin/lllts --project tsconfig.json --entry src/rules/testing/examples/MathObject.lll.ts",
-		"lll-example-bad-many-functions": "tsc && ./bin/lllts --project tsconfig.json --entry src/examples/intentionallyBadExampleTests/ClassUsingManyFunctions.ts",
-		"lll-example-bad-rogue-top-level": "tsc && ./bin/lllts --project tsconfig.json --entry src/examples/intentionallyBadExampleTests/RogueTopLevelViolationsEntry.ts",
+		"lll-check": "tsc && ./bin/evidyts --project tsconfig.json --entry src/LLLTS.lll.ts --noEmit",
+		"lll-check-no-tests": "tsc && ./bin/evidyts --project tsconfig.json --entry src/LLLTS.lll.ts --noTests",
+		"lll-check-verbose": "tsc && ./bin/evidyts --project tsconfig.json --entry src/LLLTS.lll.ts --verbose",
+		"lll-example-check-quick": "tsc && ./bin/evidyts --project tsconfig.json --entry src/rules/testing/examples/MathObject.lll.ts",
+		"lll-example-bad-many-functions": "tsc && ./bin/evidyts --project tsconfig.json --entry src/examples/intentionallyBadExampleTests/ClassUsingManyFunctions.ts",
+		"lll-example-bad-rogue-top-level": "tsc && ./bin/evidyts --project tsconfig.json --entry src/examples/intentionallyBadExampleTests/RogueTopLevelViolationsEntry.ts",
 		"build:typescript": "tsc",
 		"typecheck:overlay-runtime": "tsc -p tsconfig.overlay-runtime.json --noEmit",
 		"build:overlay-runtime": "node scripts/build-overlay-runtime.mjs",
@@ -27,10 +27,13 @@
 		"playwright-setup": "pnpm exec playwright install chromium",
 		"playwright-list": "pnpm exec playwright install --list",
 		"i": "pnpm i",
+		"install-evidyts-global": "pnpm link --global",
+		"uninstall-evidyts-global": "pnpm remove --global lllts",
 		"install-lllts-global": "pnpm link --global",
 		"uninstall-lllts-global": "pnpm remove --global lllts"
 	},
 	"keywords": [
+		"evidyts",
 		"typescript",
 		"compiler",
 		"testing",

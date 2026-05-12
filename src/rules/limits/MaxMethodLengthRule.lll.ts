@@ -5,7 +5,7 @@ import { Rule } from "../../core/rulesEngine/Rule"
 import { Spec } from "../../public/lll.lll"
 import { BreadthRuleLimits } from "./BreadthRuleLimits"
 
-@Spec("Enforces a maximum method body length in lines for all methods in LLLTS classes.")
+@Spec("Enforces a maximum method body length in lines for all methods in EvidyTS classes.")
 export class MaxMethodLengthRule {
 	static get MAX_LINES(): number {
 		return BreadthRuleLimits.getConfig().maxMethodBodyLines

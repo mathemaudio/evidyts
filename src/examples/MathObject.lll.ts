@@ -1,6 +1,6 @@
 import { Spec } from "../public/lll.lll.js"
 
-@Spec("Simple calculator demonstrating server-side LLLTS components.")
+@Spec("Simple calculator demonstrating server-side EvidyTS components.")
 export class MathObject {
 	@Spec("Adds two numbers and returns the result.")
 	public static add(a: number, b: number): number {

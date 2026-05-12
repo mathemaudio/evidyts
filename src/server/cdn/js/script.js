@@ -136,7 +136,7 @@
       const normalizedHostModuleUrl = String(hostModuleUrl ?? "");
       const importErrorMessage = this.errorMessage(importError);
       const details = importErrorMessage.length > 0 ? ` Browser import error: ${importErrorMessage}` : "";
-      return `Test file '${normalizedTestPath}' does not have an accessible paired production companion at '${normalizedHostPath}'. LLLTS test files are companion tests for same-named production modules; the overlay imports that companion so behavioral tests can preview and exercise the production host class. Expected import URL: ${normalizedHostModuleUrl}.${details}`;
+      return `Test file '${normalizedTestPath}' does not have an accessible paired production companion at '${normalizedHostPath}'. EvidyTS test files are companion tests for same-named production modules; the overlay imports that companion so behavioral tests can preview and exercise the production host class. Expected import URL: ${normalizedHostModuleUrl}.${details}`;
     }
     static isExpectedPairedHostImportFetchFailure(importError, hostPath, hostModuleUrl) {
       const importErrorMessage = this.errorMessage(importError);
@@ -354,8 +354,8 @@
   };
   __publicField(_OverlayModuleRuntime, "nativeHTMLElementConstructor", typeof HTMLElement === "function" ? HTMLElement : null);
   __publicField(_OverlayModuleRuntime, "cacheBusterQueryParam", "__lllts_cb");
-  __publicField(_OverlayModuleRuntime, "debugPrefix", "[LLLTS overlay]");
-  __publicField(_OverlayModuleRuntime, "identityProbePrefix", "[LLLTS identity probe]");
+  __publicField(_OverlayModuleRuntime, "debugPrefix", "[EvidyTS overlay]");
+  __publicField(_OverlayModuleRuntime, "identityProbePrefix", "[EvidyTS identity probe]");
   __publicField(_OverlayModuleRuntime, "constructorTagMap", /* @__PURE__ */ new Map());
   __publicField(_OverlayModuleRuntime, "constructorAliasMap", /* @__PURE__ */ new Map());
   var OverlayModuleRuntime = _OverlayModuleRuntime;
@@ -1410,6 +1410,6 @@
   __publicField(OverlayRuntimeBootstrap, "configElementId", "lllts-overlay-config");
   __publicField(OverlayRuntimeBootstrap, "fallbackAssetsBasePath", "/__lllts-overlay");
   void OverlayRuntimeBootstrap.start().catch((error) => {
-    console.error("[LLLTS overlay] Failed to initialize overlay.", error);
+    console.error("[EvidyTS overlay] Failed to initialize overlay.", error);
   });
 })();

@@ -2,7 +2,7 @@ import * as fs from "fs"
 import * as path from "path"
 import { Spec } from "../../public/lll.lll"
 
-@Spec("Loads the single shared configuration for LLLTS breadth and size limits.")
+@Spec("Loads the single shared configuration for EvidyTS breadth and size limits.")
 export class BreadthRuleLimits {
 	private static readonly CONFIG_FILE_NAME = "breadth-rule-limits.json"
 

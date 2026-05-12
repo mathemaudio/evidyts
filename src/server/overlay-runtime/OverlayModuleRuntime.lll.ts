@@ -1,8 +1,8 @@
 export class OverlayModuleRuntime {
 	private static readonly nativeHTMLElementConstructor = typeof HTMLElement === "function" ? HTMLElement : null
 	private static readonly cacheBusterQueryParam = "__lllts_cb"
-	private static readonly debugPrefix = "[LLLTS overlay]"
-	private static readonly identityProbePrefix = "[LLLTS identity probe]"
+	private static readonly debugPrefix = "[EvidyTS overlay]"
+	private static readonly identityProbePrefix = "[EvidyTS identity probe]"
 	private static readonly constructorTagMap = new Map<Function, string>()
 	private static readonly constructorAliasMap = new Map<Function, Function>()
 
@@ -153,7 +153,7 @@ export class OverlayModuleRuntime {
 		const normalizedHostModuleUrl = String(hostModuleUrl ?? "")
 		const importErrorMessage = this.errorMessage(importError)
 		const details = importErrorMessage.length > 0 ? ` Browser import error: ${importErrorMessage}` : ""
-		return `Test file '${normalizedTestPath}' does not have an accessible paired production companion at '${normalizedHostPath}'. LLLTS test files are companion tests for same-named production modules; the overlay imports that companion so behavioral tests can preview and exercise the production host class. Expected import URL: ${normalizedHostModuleUrl}.${details}`
+		return `Test file '${normalizedTestPath}' does not have an accessible paired production companion at '${normalizedHostPath}'. EvidyTS test files are companion tests for same-named production modules; the overlay imports that companion so behavioral tests can preview and exercise the production host class. Expected import URL: ${normalizedHostModuleUrl}.${details}`
 	}
 
 	public static isExpectedPairedHostImportFetchFailure(importError: unknown, hostPath: unknown, hostModuleUrl: unknown): boolean {
