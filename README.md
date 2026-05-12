@@ -7,9 +7,6 @@ easy to forget into deterministic compiler pressure: visible specs, predictable 
 tests, browser-verified behavior, and hard limits that keep projects from turning into a cleanup
 project after the first demo.
 
-Evidype is the VS Code AI coding agent. EvidyTS is the stricter TypeScript compiler/dialect behind
-Evidype, and Evidype targets EvidyTS inside VS Code.
-
 ## Why This Exists
 
 AI can generate code quickly. That is useful, but speed alone does not keep a system coherent.
