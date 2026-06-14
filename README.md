@@ -25,7 +25,7 @@ patterns and more attention on structure, behavior, and tests.
 ## The Core Idea
 
 (for the full language
-and workflow docs, see the [Evidype documentation](https://evidype.com/documentation).)
+and workflow docs, see the [Evidype documentation](https://evidype.com/documentation))
 
 > Make the shape of the program obvious before anyone reads the implementation.
 
