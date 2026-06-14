@@ -23,6 +23,7 @@ type OverlayTestResult = {
 
 export class OverlayController {
 	private static readonly defaultInteractiveStepTimeoutMs = 10000
+	private static readonly previewFullscreenClassName = "lllts-preview-fullscreen"
 	private readonly tests: string[]
 	private readonly openByDefault: boolean
 	private readonly scenarioApi = OverlayScenarioRuntime.getGlobalApi()
@@ -41,6 +42,7 @@ export class OverlayController {
 	private popupStatus: HTMLElement | null = null
 	private popupRenderHost: HTMLElement | null = null
 	private popupClose: HTMLButtonElement | null = null
+	private popupFullscreen: HTMLButtonElement | null = null
 	private popupScenariosList: HTMLElement | null = null
 	private popupScenariosEmpty: HTMLElement | null = null
 	private popupScenariosPlayAll: HTMLButtonElement | null = null
@@ -84,6 +86,8 @@ export class OverlayController {
 		}
 
 		this.popupClose?.addEventListener("click", () => this.closePopup())
+		this.popupFullscreen?.addEventListener("click", () => this.setPreviewFullscreen(true))
+		document.addEventListener("keydown", event => this.handleDocumentKeydown(event))
 		this.terminalPopupClose?.addEventListener("click", () => this.closeTerminalPopup())
 		this.panelPlayAll?.addEventListener("click", async () => {
 			await this.runPanelPlayAllSequence(false)
@@ -152,6 +156,7 @@ export class OverlayController {
 		this.popupStatus = document.getElementById("lllts-test-popup-status")
 		this.popupRenderHost = document.getElementById("lllts-test-popup-render")
 		this.popupClose = document.getElementById("lllts-test-popup-close") as HTMLButtonElement | null
+		this.popupFullscreen = document.getElementById("lllts-test-popup-fullscreen") as HTMLButtonElement | null
 		this.popupScenariosList = document.getElementById("lllts-test-popup-scenarios-list")
 		this.popupScenariosEmpty = document.getElementById("lllts-test-popup-scenarios-empty")
 		this.popupScenariosPlayAll = document.getElementById("lllts-test-popup-scenarios-play-all") as HTMLButtonElement | null
@@ -173,6 +178,7 @@ export class OverlayController {
 			&& this.popupStatus
 			&& this.popupRenderHost
 			&& this.popupClose
+			&& this.popupFullscreen
 			&& this.popupScenariosList
 			&& this.popupScenariosEmpty
 			&& this.popupScenariosPlayAll
@@ -255,6 +261,7 @@ export class OverlayController {
 	}
 
 	private closePopup(): void {
+		this.setPreviewFullscreen(false)
 		this.popup?.classList.remove("lllts-open")
 		this.syncBackdropState()
 	}
@@ -271,6 +278,26 @@ export class OverlayController {
 	private closeTerminalPopup(): void {
 		this.terminalPopup?.classList.remove("lllts-open")
 		this.syncBackdropState()
+	}
+
+	private handleDocumentKeydown(event: KeyboardEvent): void {
+		if (event.key !== "Escape" || !this.isPreviewFullscreen()) {
+			return
+		}
+		event.preventDefault()
+		this.setPreviewFullscreen(false)
+	}
+
+	private isPreviewFullscreen(): boolean {
+		return document.documentElement.classList.contains(OverlayController.previewFullscreenClassName)
+	}
+
+	private setPreviewFullscreen(isFullscreen: boolean): void {
+		document.documentElement.classList.toggle(OverlayController.previewFullscreenClassName, isFullscreen)
+		this.popup?.classList.toggle(OverlayController.previewFullscreenClassName, isFullscreen)
+		if (this.popupFullscreen) {
+			this.popupFullscreen.setAttribute("aria-pressed", isFullscreen ? "true" : "false")
+		}
 	}
 
 	private syncBackdropState(): void {
@@ -708,7 +735,7 @@ export class OverlayController {
 		return await this.runPlayAllScenarios(runContext)
 	}
 
-	private async runPanelPlayAllSequence(_isAutoRun: boolean): Promise<void> {
+	private async runPanelPlayAllSequence(isAutoRun: boolean): Promise<void> {
 		if (this.isRunningAllTests || this.tests.length === 0) {
 			return
 		}
@@ -717,6 +744,9 @@ export class OverlayController {
 		this.isRunningAllTests = true
 		this.setPanelPlayAllEnabled(false)
 		this.setListButtonsEnabled(false)
+		if (isAutoRun) {
+			this.setPreviewFullscreen(true)
+		}
 
 		let hasFailures = false
 		const testReports: Array<{

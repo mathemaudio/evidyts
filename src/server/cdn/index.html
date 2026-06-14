@@ -1,40 +1,43 @@
 <div id="lllts-overlay-backdrop" aria-hidden="true"></div>
 <aside id="lllts-test-panel" aria-label="EvidyTS tests panel">
-  <div id="lllts-test-panel-header">
-    <div id="lllts-test-panel-title-row">
-      <h3>Project Tests</h3>
-      <span id="lllts-test-panel-version" aria-label="EvidyTS version">LLL</span>
-    </div>
-    <div id="lllts-test-panel-controls">
-      <button id="lllts-test-panel-play-all" type="button">Play All</button>
-      <span id="lllts-test-panel-result" aria-live="polite"></span>
-    </div>
-  </div>
-  <p id="lllts-test-empty" hidden>No companion test files found.</p>
-  <ul id="lllts-test-list"></ul>
+	<div id="lllts-test-panel-header">
+		<div id="lllts-test-panel-title-row">
+			<h3>Project Tests</h3>
+			<span id="lllts-test-panel-version" aria-label="EvidyTS version">EvidyTS</span>
+		</div>
+		<div id="lllts-test-panel-controls">
+			<button id="lllts-test-panel-play-all" type="button">Play All</button>
+			<span id="lllts-test-panel-result" aria-live="polite"></span>
+		</div>
+	</div>
+	<p id="lllts-test-empty" hidden>No companion test files found.</p>
+	<ul id="lllts-test-list"></ul>
 </aside>
 <div id="lllts-test-popup" role="dialog" aria-modal="false">
-  <h4 id="lllts-test-popup-title">Test Preview</h4>
-  <div id="lllts-test-popup-content">
-    <aside id="lllts-test-popup-scenarios" aria-label="Scenarios">
-      <div id="lllts-test-popup-scenarios-header">
-        <h5 id="lllts-test-popup-scenarios-title">Scenarios</h5>
-        <button id="lllts-test-popup-scenarios-play-all" type="button">Play All</button>
-      </div>
-      <p id="lllts-test-popup-scenarios-empty">No scenarios found for this test.</p>
-      <ul id="lllts-test-popup-scenarios-list"></ul>
-    </aside>
-    <section id="lllts-test-popup-main">
-      <p id="lllts-test-popup-body">Select a test to preview.</p>
-      <p id="lllts-test-popup-link"></p>
-      <p id="lllts-test-popup-status"></p>
-      <div id="lllts-test-popup-render"></div>
-      <button id="lllts-test-popup-close" type="button">Close</button>
-    </section>
-  </div>
+	<h4 id="lllts-test-popup-title">Test Preview</h4>
+	<div id="lllts-test-popup-content">
+		<aside id="lllts-test-popup-scenarios" aria-label="Scenarios">
+			<div id="lllts-test-popup-scenarios-header">
+				<h5 id="lllts-test-popup-scenarios-title">Scenarios</h5>
+				<button id="lllts-test-popup-scenarios-play-all" type="button">Play All</button>
+			</div>
+			<p id="lllts-test-popup-scenarios-empty">No scenarios found for this test.</p>
+			<ul id="lllts-test-popup-scenarios-list"></ul>
+		</aside>
+		<section id="lllts-test-popup-main">
+			<p id="lllts-test-popup-body">Select a test to preview.</p>
+			<p id="lllts-test-popup-link"></p>
+			<p id="lllts-test-popup-status"></p>
+			<div id="lllts-test-popup-render"></div>
+			<div id="lllts-test-popup-actions">
+				<button id="lllts-test-popup-close" type="button">Close</button>
+				<button id="lllts-test-popup-fullscreen" type="button" aria-pressed="false">Fullscreen</button>
+			</div>
+		</section>
+	</div>
 </div>
 <div id="lllts-terminal-popup" role="dialog" aria-modal="false">
-  <h4 id="lllts-terminal-popup-title">Terminal</h4>
-  <pre id="lllts-terminal-popup-body"></pre>
-  <button id="lllts-terminal-popup-close" type="button">Close</button>
+	<h4 id="lllts-terminal-popup-title">Terminal</h4>
+	<pre id="lllts-terminal-popup-body"></pre>
+	<button id="lllts-terminal-popup-close" type="button">Close</button>
 </div>

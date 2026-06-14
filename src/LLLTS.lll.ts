@@ -87,7 +87,8 @@ export class LLLTS {
 			clientTunnelResult = await runner.run({
 				url: clientTunnelConfig.url,
 				headed: clientTunnelConfig.headed,
-				timeoutMs: clientTunnelConfig.timeoutMs
+				timeoutMs: clientTunnelConfig.timeoutMs,
+				projectRoot: loader.getProjectRootDir()
 			})
 			allDiagnostics.push(...this.mapClientTunnelResultToDiagnostics(clientTunnelResult, inventory))
 			this.printClientTunnelOutput(clientTunnelResult, verbose)

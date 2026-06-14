@@ -13,6 +13,8 @@ export type FakeRunnerOptions = {
 	launchError?: Error
 	launchErrorCount?: number
 	installError?: Error
+	screenshotRequestPath?: string
+	screenshotError?: Error
 	preflightConsoleErrors?: NonNullable<ClientTunnelRunResult["consoleErrors"]>
 	scenarioConsoleErrors?: NonNullable<ClientTunnelRunResult["consoleErrors"]>
 	consoleWarnings?: string[]

@@ -22,7 +22,7 @@ export class LLLTSTest {
 		input: {
 			hasBehavioralTests: boolean
 			ruleDiagnostics?: Array<{ severity: "error" | "warning" | "notice"; file: string; message: string; ruleCode: RuleCode; line?: number }>
-			tunnelRunner?: (runInput: { url: string; headed: boolean; timeoutMs: number }) => Promise<ClientTunnelRunResult>
+			tunnelRunner?: (runInput: { url: string; headed: boolean; timeoutMs: number; projectRoot: string }) => Promise<ClientTunnelRunResult>
 		},
 		callback: () => Promise<void>
 	): Promise<void> {
@@ -46,7 +46,7 @@ export class LLLTSTest {
 			return { diagnostics: [], reports: [] }
 		}
 		ClientTunnelRunner.prototype.run = async function stubTunnelRun(
-			runInput: { url: string; headed: boolean; timeoutMs: number }
+			runInput: { url: string; headed: boolean; timeoutMs: number; projectRoot: string }
 		) {
 			if (!input.tunnelRunner) {
 				throw new Error("Unexpected tunnel runner invocation in this test")
@@ -843,7 +843,7 @@ export class LLLTSTest {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
-		const calls: Array<{ url: string; headed: boolean; timeoutMs: number }> = []
+		const calls: Array<{ url: string; headed: boolean; timeoutMs: number; projectRoot: string }> = []
 		await this.withCompileStubs(
 			{
 				hasBehavioralTests: true,
@@ -868,6 +868,7 @@ export class LLLTSTest {
 		assert(calls[0].url === "http://localhost:3000", "Tunnel URL should be forwarded into tunnel runner")
 		assert(calls[0].headed === true, "Headed flag should be forwarded into tunnel runner")
 		assert(calls[0].timeoutMs === 1234, "Timeout flag should be forwarded into tunnel runner")
+		assert(calls[0].projectRoot === process.cwd(), "Project root should be forwarded into tunnel runner")
 	}
 
 	@Scenario("Server start with explicit valid port returns server mode")

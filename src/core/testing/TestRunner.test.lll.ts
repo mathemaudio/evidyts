@@ -86,12 +86,14 @@ export class AppTest2 {
 		const runner = new TestRunner(new ProjectInitiator('./tsconfig.json', 'from_imports', 'src/examples/MathObject.lll.ts'), './tsconfig.json')
 		let receivedInput: object | null = null
 		let receivedWaitForType = 'missing'
+		let receivedScreenshotType = 'missing'
 		let waitChecks = 0
 
 		const runtimeClass = {
 			async acceptsRuntimeHelpers(scenarioParameter: ScenarioParameter) {
 				receivedInput = scenarioParameter.input
 				receivedWaitForType = typeof scenarioParameter.waitFor
+				receivedScreenshotType = typeof scenarioParameter.screenshot
 				await scenarioParameter.waitFor(() => {
 					waitChecks += 1
 					return waitChecks > 1
@@ -123,7 +125,43 @@ export class AppTest2 {
 		assert(diagnostic === null, 'Expected static-only scenario helper injection to succeed')
 		assert(receivedInput !== null, 'Expected scenario input to default to an object')
 		assert(receivedWaitForType === 'function', 'Expected waitFor helper to be passed inside ScenarioParameter')
+		assert(receivedScreenshotType === 'function', 'Expected screenshot helper to be passed inside ScenarioParameter')
 		assert(waitChecks > 1, 'Expected waitFor to retry before succeeding')
+	}
+
+	@Scenario('reports screenshot unavailable message from unit scenarios')
+	static async reportsScreenshotUnavailableFromUnitScenarios(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+		const assert: AssertFn = scenario.assert
+		const runner = new TestRunner(new ProjectInitiator('./tsconfig.json', 'from_imports', 'src/examples/MathObject.lll.ts'), './tsconfig.json')
+
+		const runtimeClass = {
+			async capturesScreenshot(localScenario: ScenarioParameter) {
+				await localScenario.screenshot('screenshots/unit.png')
+			}
+		}
+
+		const diagnostic = await (runner as unknown as {
+			runScenarioUnit: (
+				context: { scenarioMethodName: string; className: string; scenarioName: string; filePath: string; line: number },
+				runtimeClass: Record<string, unknown>,
+				hostKind: 'instantiable' | 'static-only',
+				runtimeHostClass: Record<string, unknown> | null
+			) => Promise<DiagnosticObject | null>
+		}).runScenarioUnit(
+			{
+				scenarioMethodName: 'capturesScreenshot',
+				className: 'RuntimeHelpersTest',
+				scenarioName: 'capturesScreenshot',
+				filePath: 'src/RuntimeHelpers.test.lll.ts',
+				line: 1
+			},
+			runtimeClass,
+			'static-only',
+			null
+		)
+
+		assert(diagnostic !== null, 'Expected unit screenshot use to produce a diagnostic')
+		assert(diagnostic.message.includes('Browser tunnel unavailable'), 'Expected screenshot diagnostic to explain that the browser tunnel is unavailable')
 	}
 
 	@Scenario('passes subjectFactory into instantiable unit scenarios')

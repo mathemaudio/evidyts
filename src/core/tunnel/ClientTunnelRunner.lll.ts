@@ -10,6 +10,7 @@ import type { ClientTunnelRunResult } from "./ClientTunnelRunResult"
 @Spec("Runs behavioral scenarios through the overlay UI using a Playwright browser tunnel.")
 export class ClientTunnelRunner {
 	private static readonly progressBindingName = "FIXED_llltsReportProgress"
+	private static readonly screenshotBindingName = "FIXED_llltsTakeScreenshot"
 	private static readonly progressReadTimeoutMs = 250
 
 	constructor(
@@ -48,6 +49,7 @@ export class ClientTunnelRunner {
 			await this.exposeProgressBinding(page, progressContext => {
 				lastProgressContext = progressContext
 			})
+			await this.exposeScreenshotBinding(page, input.projectRoot)
 			const automaticUrl = this.buildAutomaticTunnelUrl(input.url, this.resolvePerStepTimeoutMs(input.timeoutMs))
 			this.attachConsoleErrorListeners(page, consoleErrors, () => currentPhase)
 
@@ -110,6 +112,39 @@ export class ClientTunnelRunner {
 		await page.exposeBinding(ClientTunnelRunner.progressBindingName, (_source: unknown, rawProgress: unknown) => {
 			onProgress(this.normalizeTimeoutContext(rawProgress, "scenario"))
 		})
+	}
+
+	@Spec("Exposes a browser-side scenario helper that captures the current Playwright page to a project-relative path.")
+	private async exposeScreenshotBinding(page: Page, projectRoot: string): Promise<void> {
+		await page.exposeBinding(ClientTunnelRunner.screenshotBindingName, async (_source: unknown, rawFilePath: unknown) => {
+			const screenshotPath = this.resolveScreenshotPath(projectRoot, rawFilePath)
+			await fs.promises.mkdir(path.dirname(screenshotPath), { recursive: true })
+			await page.screenshot({ path: screenshotPath })
+		})
+	}
+
+	@Spec("Resolves a requested screenshot path under the project root and rejects unsafe paths.")
+	private resolveScreenshotPath(projectRoot: string, rawFilePath: unknown): string {
+		const filePath = typeof rawFilePath === "string" ? rawFilePath.trim() : ""
+		if (filePath.length === 0) {
+			throw new Error("Screenshot path must be a non-empty project-relative path.")
+		}
+		if (path.isAbsolute(filePath) || path.win32.isAbsolute(filePath)) {
+			throw new Error(`Screenshot path must be project-relative, got '${filePath}'.`)
+		}
+
+		const resolvedProjectRoot = path.resolve(projectRoot)
+		const resolvedFilePath = path.resolve(resolvedProjectRoot, filePath)
+		const relativePath = path.relative(resolvedProjectRoot, resolvedFilePath)
+		if (
+			relativePath.length === 0
+			|| relativePath === ".."
+			|| relativePath.startsWith(`..${path.sep}`)
+			|| path.isAbsolute(relativePath)
+		) {
+			throw new Error(`Screenshot path escapes the project root: '${filePath}'.`)
+		}
+		return resolvedFilePath
 	}
 
 	@Spec("Reads overlay progress so timeout messages can identify the active test or scenario.")

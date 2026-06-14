@@ -177,7 +177,8 @@ export class OverlayScenarioRuntime {
 		const scenarioParameter = {
 			input: normalizedOptions.input && typeof normalizedOptions.input === "object" ? normalizedOptions.input : {},
 			assert: this.createScenarioAssert(),
-			waitFor: this.createScenarioWaitFor()
+			waitFor: this.createScenarioWaitFor(),
+			screenshot: this.createScenarioScreenshot()
 		}
 		if (typeof normalizedOptions.subjectFactory === "function" && scenarioFn.length >= 2) {
 			await scenarioFn.call(TestClass, normalizedOptions.subjectFactory, scenarioParameter)
@@ -231,6 +232,16 @@ export class OverlayScenarioRuntime {
 				})
 			}
 			throw new Error(`Condition was not met within ${String(effectiveTimeoutMs)}ms: ${String(message)}`)
+		}
+	}
+
+	private static createScenarioScreenshot(): (filePath: string) => Promise<void> {
+		return async (filePath: string): Promise<void> => {
+			const globalScope = globalThis as typeof globalThis & { FIXED_llltsTakeScreenshot?: (filePath: string) => Promise<void> }
+			if (typeof globalScope.FIXED_llltsTakeScreenshot !== "function") {
+				throw new Error("Browser tunnel unavailable: scenario.screenshot(path) can only capture screenshots while behavioral tests run through --clientTunnel.")
+			}
+			await globalScope.FIXED_llltsTakeScreenshot(filePath)
 		}
 	}
 }

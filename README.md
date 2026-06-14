@@ -24,6 +24,9 @@ patterns and more attention on structure, behavior, and tests.
 
 ## The Core Idea
 
+(for the full language
+and workflow docs, see the [Evidype documentation](https://evidype.com/documentation).)
+
 > Make the shape of the program obvious before anyone reads the implementation.
 
 EvidyTS turns common review expectations into language rules:
@@ -149,7 +152,9 @@ export class MathObjectTest {
 
 Behavioral companions go through the visible UI. They do not get to cheat by asserting private
 internals. If behavioral tests are discovered, compile mode requires a browser tunnel URL so the
-compiler can run them through the overlay.
+compiler can run them through the overlay. During a behavioral browser-tunnel scenario, call
+`await scenario.screenshot("screenshots/app-shell.png")` to save the current browser viewport to a
+project-relative path.
 
 ### Coverage Debt
 
@@ -181,6 +186,11 @@ depends on deliberate authoring. The direction is broader than testing: fail-saf
 a stronger assurance profile for projects where shared blind spots are worth extra cost.
 
 ## Quick Start
+
+The easiest way to try EvidyTS is to install the
+[Evidype VS Code extension](https://marketplace.visualstudio.com/items?itemName=shock-experts.evidype).
+The manual compiler workflow below is for working from this repository or wiring EvidyTS into your
+own scripts.
 
 Requirements:
 

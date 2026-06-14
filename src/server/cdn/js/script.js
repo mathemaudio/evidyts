@@ -617,7 +617,8 @@
       const scenarioParameter = {
         input: normalizedOptions.input && typeof normalizedOptions.input === "object" ? normalizedOptions.input : {},
         assert: this.createScenarioAssert(),
-        waitFor: this.createScenarioWaitFor()
+        waitFor: this.createScenarioWaitFor(),
+        screenshot: this.createScenarioScreenshot()
       };
       if (typeof normalizedOptions.subjectFactory === "function" && scenarioFn.length >= 2) {
         await scenarioFn.call(TestClass, normalizedOptions.subjectFactory, scenarioParameter);
@@ -669,6 +670,15 @@
         throw new Error(`Condition was not met within ${String(effectiveTimeoutMs)}ms: ${String(message)}`);
       };
     }
+    static createScenarioScreenshot() {
+      return async (filePath) => {
+        const globalScope = globalThis;
+        if (typeof globalScope.FIXED_llltsTakeScreenshot !== "function") {
+          throw new Error("Browser tunnel unavailable: scenario.screenshot(path) can only capture screenshots while behavioral tests run through --clientTunnel.");
+        }
+        await globalScope.FIXED_llltsTakeScreenshot(filePath);
+      };
+    }
   };
   __publicField(_OverlayScenarioRuntime, "globalKey", "llltsOverlayScenarios");
   var OverlayScenarioRuntime = _OverlayScenarioRuntime;
@@ -695,6 +705,7 @@
       __publicField(this, "popupStatus", null);
       __publicField(this, "popupRenderHost", null);
       __publicField(this, "popupClose", null);
+      __publicField(this, "popupFullscreen", null);
       __publicField(this, "popupScenariosList", null);
       __publicField(this, "popupScenariosEmpty", null);
       __publicField(this, "popupScenariosPlayAll", null);
@@ -730,6 +741,8 @@
         this.panel?.classList.add("lllts-open");
       }
       this.popupClose?.addEventListener("click", () => this.closePopup());
+      this.popupFullscreen?.addEventListener("click", () => this.setPreviewFullscreen(true));
+      document.addEventListener("keydown", (event) => this.handleDocumentKeydown(event));
       this.terminalPopupClose?.addEventListener("click", () => this.closeTerminalPopup());
       this.panelPlayAll?.addEventListener("click", async () => {
         await this.runPanelPlayAllSequence(false);
@@ -792,13 +805,14 @@
       this.popupStatus = document.getElementById("lllts-test-popup-status");
       this.popupRenderHost = document.getElementById("lllts-test-popup-render");
       this.popupClose = document.getElementById("lllts-test-popup-close");
+      this.popupFullscreen = document.getElementById("lllts-test-popup-fullscreen");
       this.popupScenariosList = document.getElementById("lllts-test-popup-scenarios-list");
       this.popupScenariosEmpty = document.getElementById("lllts-test-popup-scenarios-empty");
       this.popupScenariosPlayAll = document.getElementById("lllts-test-popup-scenarios-play-all");
       this.terminalPopup = document.getElementById("lllts-terminal-popup");
       this.terminalPopupBody = document.getElementById("lllts-terminal-popup-body");
       this.terminalPopupClose = document.getElementById("lllts-terminal-popup-close");
-      return !!(this.backdrop && this.panel && this.list && this.emptyState && this.panelVersion && this.panelPlayAll && this.panelResult && this.popup && this.popupBody && this.popupLink && this.popupStatus && this.popupRenderHost && this.popupClose && this.popupScenariosList && this.popupScenariosEmpty && this.popupScenariosPlayAll && this.terminalPopup && this.terminalPopupBody && this.terminalPopupClose);
+      return !!(this.backdrop && this.panel && this.list && this.emptyState && this.panelVersion && this.panelPlayAll && this.panelResult && this.popup && this.popupBody && this.popupLink && this.popupStatus && this.popupRenderHost && this.popupClose && this.popupFullscreen && this.popupScenariosList && this.popupScenariosEmpty && this.popupScenariosPlayAll && this.terminalPopup && this.terminalPopupBody && this.terminalPopupClose);
     }
     setStatus(message, isError) {
       if (!this.popupStatus) {
@@ -866,6 +880,7 @@
       this.syncBackdropState();
     }
     closePopup() {
+      this.setPreviewFullscreen(false);
       this.popup?.classList.remove("lllts-open");
       this.syncBackdropState();
     }
@@ -880,6 +895,23 @@
     closeTerminalPopup() {
       this.terminalPopup?.classList.remove("lllts-open");
       this.syncBackdropState();
+    }
+    handleDocumentKeydown(event) {
+      if (event.key !== "Escape" || !this.isPreviewFullscreen()) {
+        return;
+      }
+      event.preventDefault();
+      this.setPreviewFullscreen(false);
+    }
+    isPreviewFullscreen() {
+      return document.documentElement.classList.contains(_OverlayController.previewFullscreenClassName);
+    }
+    setPreviewFullscreen(isFullscreen) {
+      document.documentElement.classList.toggle(_OverlayController.previewFullscreenClassName, isFullscreen);
+      this.popup?.classList.toggle(_OverlayController.previewFullscreenClassName, isFullscreen);
+      if (this.popupFullscreen) {
+        this.popupFullscreen.setAttribute("aria-pressed", isFullscreen ? "true" : "false");
+      }
     }
     syncBackdropState() {
       this.backdrop?.classList.add("lllts-open");
@@ -1295,7 +1327,7 @@
       }
       return await this.runPlayAllScenarios(runContext);
     }
-    async runPanelPlayAllSequence(_isAutoRun) {
+    async runPanelPlayAllSequence(isAutoRun) {
       if (this.isRunningAllTests || this.tests.length === 0) {
         return;
       }
@@ -1304,6 +1336,9 @@
       this.isRunningAllTests = true;
       this.setPanelPlayAllEnabled(false);
       this.setListButtonsEnabled(false);
+      if (isAutoRun) {
+        this.setPreviewFullscreen(true);
+      }
       let hasFailures = false;
       const testReports = [];
       try {
@@ -1359,6 +1394,7 @@
     }
   };
   __publicField(_OverlayController, "defaultInteractiveStepTimeoutMs", 1e4);
+  __publicField(_OverlayController, "previewFullscreenClassName", "lllts-preview-fullscreen");
   var OverlayController = _OverlayController;
 
   // src/server/overlay-runtime/OverlayRuntimeBootstrap.lll.ts

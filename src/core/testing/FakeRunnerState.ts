@@ -10,4 +10,5 @@ export type FakeRunnerState = {
 	visitedUrl?: string
 	waitForFunctionCallCount?: number
 	exposedBindingNames?: string[]
+	screenshotPaths?: string[]
 }

@@ -1,3 +1,6 @@
+import * as fs from "fs"
+import * as os from "os"
+import * as path from "path"
 import type { BrowserType, Page } from "playwright"
 import { AssertFn, Scenario, Spec, WaitForFn, ScenarioParameter, SubjectFactory } from "../../public/lll.lll"
 import type { FakeRunnerOptions } from "../testing/FakeRunnerOptions"
@@ -20,7 +23,8 @@ export class ClientTunnelRunnerTest {
 			browserClosedCount: 0,
 			visitedUrl: "",
 			waitForFunctionCallCount: 0,
-			exposedBindingNames: []
+			exposedBindingNames: [],
+			screenshotPaths: []
 		}
 
 		let evaluateCount = 0
@@ -100,7 +104,16 @@ export class ClientTunnelRunnerTest {
 					}
 					throw options.waitError
 				}
+				if (options.screenshotRequestPath !== undefined) {
+					await exposedBindings.FIXED_llltsTakeScreenshot?.(options.screenshotRequestPath)
+				}
 				emitConfiguredEvents(options.scenarioConsoleErrors)
+			},
+			screenshot: async function screenshot(screenshotOptions: { path?: string }): Promise<void> {
+				if (options.screenshotError !== undefined) {
+					throw options.screenshotError
+				}
+				state.screenshotPaths?.push(String(screenshotOptions.path ?? ""))
 			},
 			evaluate: async function evaluate<T>(_fn: Parameters<Page["evaluate"]>[0]): Promise<T> {
 				evaluateCount++
@@ -168,7 +181,7 @@ export class ClientTunnelRunnerTest {
 		const fixture = this.createRunner({
 			reportText: "## src/App.test.lll.ts\n- scenario one: passed\n\nAll client behavioral tests passed"
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "passed", "Expected tunnel result to pass when report ends with client behavioral pass summary")
 		assert(fixture.state.launchHeadless === true, "Runner should launch headless browser when headed=false")
 		assert(fixture.state.contextClosedCount === 1, "Runner should close context after run")
@@ -183,7 +196,7 @@ export class ClientTunnelRunnerTest {
 		const fixture = this.createRunner({
 			reportText: "## src/App.test.lll.ts\n⛔️ scenario one: failed: nope\n\nSome Failed"
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "failed", "Expected tunnel result to fail when report ends with failed")
 		assert(!!result.reportText && result.reportText.includes("Some Failed"), "Expected failed run to include report text")
 	}
@@ -196,7 +209,7 @@ export class ClientTunnelRunnerTest {
 		const timeoutError = new Error("wait timed out")
 		timeoutError.name = "TimeoutError"
 		const fixture = this.createRunner({ waitError: timeoutError })
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500, projectRoot: process.cwd() })
 		assert(result.status === "timeout", "Expected TimeoutError to map to timeout status")
 		assert(result.timeoutContext?.phase === "scenario", "waitForFunction timeout should be labeled as scenario phase")
 		assert(fixture.state.contextClosedCount === 1, "Timeout run should close context")
@@ -218,7 +231,7 @@ export class ClientTunnelRunnerTest {
 				scenarioMethodName: "opensSettings"
 			}
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500, projectRoot: process.cwd() })
 		assert(result.status === "timeout", "Expected timeout status")
 		assert(result.timeoutContext?.testPath === "src/App.test.lll.ts", "Timeout should retain active test path")
 		assert(result.timeoutContext?.scenarioName === "opens settings", "Timeout should retain active scenario title")
@@ -241,7 +254,7 @@ export class ClientTunnelRunnerTest {
 			},
 			hangTimeoutProgressRead: true
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500, projectRoot: process.cwd() })
 		assert(result.status === "timeout", "Expected timeout status")
 		assert(
 			fixture.state.exposedBindingNames?.includes("FIXED_llltsReportProgress") === true,
@@ -264,7 +277,7 @@ export class ClientTunnelRunnerTest {
 			hangTimeoutProgressRead: true
 		})
 		const startedAt = Date.now()
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500, projectRoot: process.cwd() })
 		assert(result.status === "timeout", "Expected timeout status")
 		assert(result.timeoutContext?.phase === "scenario", "Timeout should still be labeled as scenario phase")
 		assert(Date.now() - startedAt < 1000, "Progress read fallback should not hang the tunnel runner")
@@ -278,7 +291,7 @@ export class ClientTunnelRunnerTest {
 		const timeoutError = new Error("page.goto: Timeout 30000ms exceeded.")
 		timeoutError.name = "TimeoutError"
 		const fixture = this.createRunner({ gotoError: timeoutError })
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 500, projectRoot: process.cwd() })
 		assert(result.status === "timeout", "Expected goto timeout to map to timeout status")
 		assert(result.timeoutContext?.phase === "navigation", "Navigation timeout should be labeled before scenario execution")
 	}
@@ -289,7 +302,7 @@ export class ClientTunnelRunnerTest {
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
 		const fixture = this.createRunner({ gotoError: new Error("navigation failed") })
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: true, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: true, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "runtime_error", "Non-timeout runtime exceptions should map to runtime_error")
 		assert(fixture.state.launchHeadless === false, "Runner should launch headed browser when headed=true")
 	}
@@ -306,7 +319,7 @@ export class ClientTunnelRunnerTest {
 			launchError,
 			launchErrorCount: 1
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "passed", "Expected runner to recover after installing Chromium")
 		assert((fixture.state.installAttemptCount ?? 0) === 1, "Expected runner to install Chromium once")
 		assert((fixture.state.launchAttemptCount ?? 0) === 2, "Expected browser launch to retry once after installation")
@@ -325,7 +338,7 @@ export class ClientTunnelRunnerTest {
 			launchError,
 			installError
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "runtime_error", "Expected install failure to remain a runtime error")
 		assert(
 			(result.message ?? "").includes("project environment is blocking the Playwright installer"),
@@ -347,11 +360,54 @@ export class ClientTunnelRunnerTest {
 			reportText: "## src/App.test.lll.ts\n- scenario one: passed\n\nAll client behavioral tests passed",
 			reportJson
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "passed", "Expected report with client behavioral pass summary to map to passed status")
 		assert(!!result.reportJson && typeof result.reportJson === "object", "Expected JSON mirror to be returned when present")
 		const summary = (result.reportJson as { summary?: { totalTests?: number } }).summary
 		assert(!!summary && summary.totalTests === 1, "Expected JSON mirror summary to preserve totalTests")
+	}
+
+	@Scenario("Screenshot binding writes a project-relative path")
+	static async screenshotBindingWritesProjectRelativePath(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lllts-screenshot-"))
+
+		try {
+			const fixture = this.createRunner({
+				screenshotRequestPath: "screenshots/app-shell.png"
+			})
+			const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: tempRoot })
+			const expectedPath = path.join(tempRoot, "screenshots", "app-shell.png")
+
+			assert(result.status === "passed", "Expected screenshot-capable tunnel run to pass")
+			assert(
+				fixture.state.exposedBindingNames?.includes("FIXED_llltsTakeScreenshot") === true,
+				"Runner should expose the browser screenshot binding"
+			)
+			assert(fixture.state.screenshotPaths?.[0] === expectedPath, "Screenshot binding should resolve paths under the project root")
+			assert(fs.existsSync(path.dirname(expectedPath)), "Screenshot binding should create the parent screenshot directory")
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true })
+		}
+	}
+
+	@Scenario("Screenshot binding rejects paths outside project root")
+	static async screenshotBindingRejectsUnsafePath(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lllts-screenshot-"))
+
+		try {
+			const fixture = this.createRunner({
+				screenshotRequestPath: "../outside.png"
+			})
+			const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: tempRoot })
+
+			assert(result.status === "runtime_error", "Unsafe screenshot paths should fail the tunnel run")
+			assert(result.message?.includes("escapes the project root") === true, "Unsafe screenshot path error should explain the project-root escape")
+			assert((fixture.state.screenshotPaths?.length ?? 0) === 0, "Unsafe screenshot paths should not reach page.screenshot")
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true })
+		}
 	}
 
 	@Scenario("Appends automatic and per-step timeout query params to tunnel URL before browser navigation")
@@ -360,7 +416,7 @@ export class ClientTunnelRunnerTest {
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
 		const fixture = this.createRunner()
-		await fixture.runner.run({ url: "http://localhost:3000/tunnel", headed: false, timeoutMs: 60000 })
+		await fixture.runner.run({ url: "http://localhost:3000/tunnel", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(
 			fixture.state.visitedUrl === "http://localhost:3000/tunnel?automatic=true&stepTimeoutMs=10000",
 			"Expected tunnel runner to append automatic and capped per-step timeout query params when query string is absent"
@@ -373,7 +429,7 @@ export class ClientTunnelRunnerTest {
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
 		const fixture = this.createRunner()
-		await fixture.runner.run({ url: "http://localhost:3000/tunnel?foo=bar", headed: false, timeoutMs: 60000 })
+		await fixture.runner.run({ url: "http://localhost:3000/tunnel?foo=bar", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(
 			fixture.state.visitedUrl === "http://localhost:3000/tunnel?foo=bar&automatic=true&stepTimeoutMs=10000",
 			"Expected tunnel runner to preserve existing query params when adding automatic and per-step timeout query params"
@@ -386,7 +442,7 @@ export class ClientTunnelRunnerTest {
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
 		const fixture = this.createRunner()
-		await fixture.runner.run({ url: "http://localhost:3000/tunnel", headed: false, timeoutMs: 4321 })
+		await fixture.runner.run({ url: "http://localhost:3000/tunnel", headed: false, timeoutMs: 4321, projectRoot: process.cwd() })
 		assert(
 			fixture.state.visitedUrl === "http://localhost:3000/tunnel?automatic=true&stepTimeoutMs=4321",
 			"Expected tunnel runner to preserve shorter explicit timeouts for each automatic test step"
@@ -401,7 +457,7 @@ export class ClientTunnelRunnerTest {
 		const fixture = this.createRunner({
 			preflightConsoleErrors: [{ phase: "preflight", source: "pageerror", text: "component exploded" }]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "console_error", "Preflight pageerror should stop tunnel execution")
 		assert((result.consoleErrors ?? []).length === 1, "Preflight pageerror should be returned to the CLI")
 		assert((fixture.state.waitForFunctionCallCount ?? 0) === 0, "Preflight errors should prevent test execution wait")
@@ -420,7 +476,7 @@ export class ClientTunnelRunnerTest {
 				location: { url: "http://localhost:3000/src/App.ts", lineNumber: 12, columnNumber: 3 }
 			}]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "console_error", "Preflight console.error should stop tunnel execution")
 		assert(
 			(result.consoleErrors ?? [])[0]?.location?.lineNumber === 12,
@@ -437,7 +493,7 @@ export class ClientTunnelRunnerTest {
 			reportText: "## src/App.test.lll.ts\n- scenario one: passed\n\nAll client behavioral tests passed",
 			scenarioConsoleErrors: [{ phase: "scenario", source: "console.error", text: "interaction broke" }]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "console_error", "Scenario-time console errors should fail the tunnel")
 		assert(!!result.reportText && result.reportText.includes("All client behavioral tests passed"), "Scenario-time console errors should keep the terminal report")
 		assert((result.consoleErrors ?? [])[0]?.phase === "scenario", "Scenario-time console errors should be labeled as scenario phase")
@@ -451,7 +507,7 @@ export class ClientTunnelRunnerTest {
 		const fixture = this.createRunner({
 			consoleWarnings: ["vite fallback warning", "lit dev mode warning"]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "passed", "Warnings alone should not fail the tunnel")
 	}
 
@@ -468,7 +524,7 @@ export class ClientTunnelRunnerTest {
 				location: { url: "http://localhost:16023/@vite/client", lineNumber: 536, columnNumber: 1 }
 			}]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "passed", "Known Vite websocket noise should not fail the tunnel")
 		assert((result.consoleErrors ?? []).length === 0, "Ignored websocket noise should not be returned as a browser runtime error")
 	}
@@ -486,7 +542,7 @@ export class ClientTunnelRunnerTest {
 				location: { url: "http://localhost:3000/src/OwnSocketClient.ts", lineNumber: 12, columnNumber: 4 }
 			}]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "console_error", "Non-Vite websocket failures should still fail the tunnel")
 	}
 
@@ -503,7 +559,7 @@ export class ClientTunnelRunnerTest {
 				location: { url: "http://localhost:45273/@vite/client", lineNumber: 0, columnNumber: 0 }
 			}]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "passed", "Known Vite 502 asset noise should not fail the tunnel")
 		assert((result.consoleErrors ?? []).length === 0, "Ignored Vite 502 noise should not be returned as a browser runtime error")
 	}
@@ -521,7 +577,7 @@ export class ClientTunnelRunnerTest {
 				location: { url: "http://localhost:25723/?automatic=true", lineNumber: 0, columnNumber: 0 }
 			}]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "passed", "Known automatic tunnel 502 noise should not fail the tunnel")
 		assert((result.consoleErrors ?? []).length === 0, "Ignored automatic tunnel 502 noise should not be returned as a browser runtime error")
 	}
@@ -539,7 +595,7 @@ export class ClientTunnelRunnerTest {
 				location: { url: "http://localhost:3000/src/App.ts", lineNumber: 7, columnNumber: 1 }
 			}]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "console_error", "Non-Vite 502 failures should still fail the tunnel")
 	}
 
@@ -555,7 +611,7 @@ export class ClientTunnelRunnerTest {
 				text: "Error: boom\nat one\nat two\nat three\nat four"
 			}]
 		})
-		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000 })
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(result.status === "console_error", "Pageerror stack should still fail the tunnel")
 		assert(
 			(result.consoleErrors ?? [])[0]?.text === "Error: boom\nat one\nat two\nshowing 3 of 5 total",

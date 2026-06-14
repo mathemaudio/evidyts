@@ -22,7 +22,7 @@ import type { TestReport } from "./TestReport"
 import type { TestRunnerResult } from "./TestRunnerResult"
 import type { TestType } from "./TestType"
 import type { TsConfig } from "../config/TsConfig"
-import type { AssertFn, ScenarioParameter, SubjectFactory, WaitForFn } from "../../public/lll.lll"
+import type { AssertFn, ScenarioParameter, ScreenshotFn, SubjectFactory, WaitForFn } from "../../public/lll.lll"
 //
 @Spec("Executes unit scenarios inside supported companion test classes and summarizes behavioral test inventory.")
 export class TestRunner {
@@ -369,7 +369,15 @@ export class TestRunner {
 		return {
 			input: {},
 			assert: this.createAssert(),
-			waitFor: this.createWaitFor()
+			waitFor: this.createWaitFor(),
+			screenshot: this.createScreenshot()
+		}
+	}
+
+	@Spec("Builds a screenshot helper placeholder for non-browser unit scenario execution.")
+	private createScreenshot(): ScreenshotFn {
+		return async (_filePath: string): Promise<void> => {
+			throw new Error("Browser tunnel unavailable: scenario.screenshot(path) can only capture screenshots while behavioral tests run through --clientTunnel.")
 		}
 	}
 

@@ -6,10 +6,12 @@ export type WaitForFn = (
 	timeoutMs?: number,
 	intervalMs?: number
 ) => Promise<void>;
+export type ScreenshotFn = (filePath: string) => Promise<void>;
 export type ScenarioParameter = {
 	input: object
 	assert: AssertFn
 	waitFor: WaitForFn
+	screenshot: ScreenshotFn
 };
 export type SubjectFactory<Subject> = () => Subject | Promise<Subject>;
 

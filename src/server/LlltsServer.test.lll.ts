@@ -7,6 +7,7 @@ import { AssertFn, Scenario, Spec, WaitForFn, ScenarioParameter, SubjectFactory 
 import "./LlltsServer.lll"
 import { LlltsServer } from "./LlltsServer.lll.js"
 import { OverlayModuleRuntime } from "./overlay-runtime/OverlayModuleRuntime.lll.js"
+import { OverlayScenarioRuntime } from "./overlay-runtime/OverlayScenarioRuntime.lll.js"
 import type { ServerConfig } from "./ServerConfig"
 
 @Spec("Unit scenarios for LlltsServer proxying, runtime checks, and injected test overlay behavior.")
@@ -84,6 +85,69 @@ export class LlltsServerTest {
 						resolve()
 					})
 				})
+			}
+		}
+	}
+
+	@Scenario("Overlay scenario parameter routes screenshot helper to browser binding")
+	static async overlayScenarioRoutesScreenshotBinding(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+		const assert: AssertFn = scenario.assert
+		const globalScope = globalThis as typeof globalThis & { FIXED_llltsTakeScreenshot?: (filePath: string) => Promise<void> }
+		const previousBinding = globalScope.FIXED_llltsTakeScreenshot
+		const capturedPaths: string[] = []
+
+		globalScope.FIXED_llltsTakeScreenshot = async (filePath: string): Promise<void> => {
+			capturedPaths.push(filePath)
+		}
+
+		try {
+			const TestClass = {
+				async capturesScreenshot(localScenario: ScenarioParameter): Promise<void> {
+					await localScenario.screenshot("screenshots/overlay.png")
+				}
+			}
+
+			await OverlayScenarioRuntime.runScenarioMethod(TestClass, "capturesScreenshot", { input: {} })
+			assert(capturedPaths[0] === "screenshots/overlay.png", "Overlay scenario screenshot helper should call the browser binding with the requested path")
+		} finally {
+			if (previousBinding === undefined) {
+				delete globalScope.FIXED_llltsTakeScreenshot
+			} else {
+				globalScope.FIXED_llltsTakeScreenshot = previousBinding
+			}
+		}
+	}
+
+	@Scenario("Overlay scenario screenshot binding failures reject the scenario call")
+	static async overlayScenarioScreenshotFailuresReject(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+		const assert: AssertFn = scenario.assert
+		const globalScope = globalThis as typeof globalThis & { FIXED_llltsTakeScreenshot?: (filePath: string) => Promise<void> }
+		const previousBinding = globalScope.FIXED_llltsTakeScreenshot
+
+		globalScope.FIXED_llltsTakeScreenshot = async (_filePath: string): Promise<void> => {
+			throw new Error("screenshot binding failed")
+		}
+
+		try {
+			const TestClass = {
+				async capturesScreenshot(localScenario: ScenarioParameter): Promise<void> {
+					await localScenario.screenshot("screenshots/failure.png")
+				}
+			}
+			let failureMessage = ""
+
+			try {
+				await OverlayScenarioRuntime.runScenarioMethod(TestClass, "capturesScreenshot", { input: {} })
+			} catch (error) {
+				failureMessage = error instanceof Error ? error.message : String(error)
+			}
+
+			assert(failureMessage.includes("screenshot binding failed"), "Overlay screenshot binding failures should reject the scenario call")
+		} finally {
+			if (previousBinding === undefined) {
+				delete globalScope.FIXED_llltsTakeScreenshot
+			} else {
+				globalScope.FIXED_llltsTakeScreenshot = previousBinding
 			}
 		}
 	}
@@ -252,6 +316,7 @@ export class LlltsServerTest {
 			assert(templateResponse.headers["expires"] === "0", "Overlay template route should expire immediately")
 			assert(templateResponse.body.includes("Project Tests"), "Overlay template should include test panel markup")
 			assert(templateResponse.body.includes("lllts-test-panel-version"), "Overlay template should include the version label slot")
+			assert(templateResponse.body.includes("lllts-test-popup-fullscreen"), "Overlay template should include the preview fullscreen button")
 			assert(!templateResponse.body.includes("lllts-test-toggle"), "Overlay template should not include toggle markup")
 
 			const scriptResponse = await this.request(app, "/__lllts-overlay/js/script.js")
@@ -265,6 +330,8 @@ export class LlltsServerTest {
 			assert(scriptResponse.body.includes("FIXED_llltsLastRunReport"), "Overlay script should expose fixed string report variable")
 			assert(scriptResponse.body.includes("FIXED_llltsLastRunReportJson"), "Overlay script should expose fixed JSON report variable")
 			assert(scriptResponse.body.includes("FIXED_llltsRunProgressJson"), "Overlay script should expose fixed progress variable")
+			assert(scriptResponse.body.includes("setPreviewFullscreen"), "Overlay script should include fullscreen preview state wiring")
+			assert(scriptResponse.body.includes("handleDocumentKeydown"), "Overlay script should include Escape handling for fullscreen preview")
 			assert(scriptResponse.body.includes("runPanelPlayAllSequence(true)"), "Overlay script should auto-run Play All on page load")
 
 			const scenariosScriptResponse = await this.request(app, "/__lllts-overlay/js/scenarios.js")
@@ -276,6 +343,8 @@ export class LlltsServerTest {
 			assert(styleResponse.status === 200, "Overlay style route should return HTTP 200")
 			assert(styleResponse.contentType.includes("text/css"), "Overlay style route should return text/css")
 			assert(styleResponse.body.includes("#lllts-test-panel"), "Overlay stylesheet should include panel styles")
+			assert(styleResponse.body.includes("lllts-preview-fullscreen"), "Overlay stylesheet should include preview fullscreen styles")
+			assert(styleResponse.body.includes("#lllts-test-popup-actions"), "Overlay stylesheet should include popup action row styles")
 			assert(!styleResponse.body.includes("#lllts-test-toggle"), "Overlay stylesheet should not include toggle styles")
 		} finally {
 			await upstream.close()
