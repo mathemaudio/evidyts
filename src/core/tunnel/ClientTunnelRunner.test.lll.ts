@@ -564,6 +564,25 @@ export class ClientTunnelRunnerTest {
 		assert((result.consoleErrors ?? []).length === 0, "Ignored Vite 502 noise should not be returned as a browser runtime error")
 	}
 
+	@Scenario("Ignores browser-generated unauthorized API resource console errors")
+	static async ignoresBrowserGeneratedUnauthorizedApiResourceConsoleError(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const input = scenario.input
+		const assert: AssertFn = scenario.assert
+		const waitFor: WaitForFn = scenario.waitFor
+		const fixture = this.createRunner({
+			reportText: "## src/App.test.lll.ts\n- scenario one: passed\n\nAll client behavioral tests passed",
+			scenarioConsoleErrors: [{
+				phase: "scenario",
+				source: "console.error",
+				text: "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+				location: { url: "http://localhost:16033/api/auth/login", lineNumber: 0, columnNumber: 0 }
+			}]
+		})
+		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
+		assert(result.status === "passed", "Browser-generated 401 API responses should not fail the tunnel")
+		assert((result.consoleErrors ?? []).length === 0, "Ignored 401 resource status should not be returned as a browser runtime error")
+	}
+
 	@Scenario("Ignores automatic tunnel localhost bad gateway console errors")
 	static async ignoresAutomaticTunnelLocalhostBadGatewayConsoleError(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
 		const input = scenario.input
@@ -582,8 +601,8 @@ export class ClientTunnelRunnerTest {
 		assert((result.consoleErrors ?? []).length === 0, "Ignored automatic tunnel 502 noise should not be returned as a browser runtime error")
 	}
 
-	@Scenario("Does not ignore localhost bad gateway console errors outside Vite assets")
-	static async doesNotIgnoreNonViteBadGatewayConsoleError(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+	@Scenario("Does not ignore application console errors that resemble browser HTTP status messages")
+	static async doesNotIgnoreApplicationHttpStatusConsoleError(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -591,12 +610,12 @@ export class ClientTunnelRunnerTest {
 			preflightConsoleErrors: [{
 				phase: "preflight",
 				source: "console.error",
-				text: "Failed to load resource: the server responded with a status of 502 (Bad Gateway)",
+				text: "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
 				location: { url: "http://localhost:3000/src/App.ts", lineNumber: 7, columnNumber: 1 }
 			}]
 		})
 		const result = await fixture.runner.run({ url: "http://localhost:3000", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
-		assert(result.status === "console_error", "Non-Vite 502 failures should still fail the tunnel")
+		assert(result.status === "console_error", "Application console errors should still fail the tunnel")
 	}
 
 	@Scenario("Truncates pageerror stacks to three lines with a total count footer")

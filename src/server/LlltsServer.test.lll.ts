@@ -152,6 +152,29 @@ export class LlltsServerTest {
 		}
 	}
 
+	@Scenario("Overlay scenario skips screenshots when the browser binding is unavailable")
+	static async overlayScenarioSkipsScreenshotWithoutBinding(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+		const assert: AssertFn = scenario.assert
+		const globalScope = globalThis as typeof globalThis & { FIXED_llltsTakeScreenshot?: (filePath: string) => Promise<void> }
+		const previousBinding = globalScope.FIXED_llltsTakeScreenshot
+		delete globalScope.FIXED_llltsTakeScreenshot
+
+		try {
+			const TestClass = {
+				async capturesScreenshot(localScenario: ScenarioParameter): Promise<void> {
+					await localScenario.screenshot("screenshots/manual-preview.png")
+				}
+			}
+
+			await OverlayScenarioRuntime.runScenarioMethod(TestClass, "capturesScreenshot", { input: {} })
+			assert(true, "Overlay scenario screenshots should be skipped when no browser tunnel binding exists")
+		} finally {
+			if (previousBinding !== undefined) {
+				globalScope.FIXED_llltsTakeScreenshot = previousBinding
+			}
+		}
+	}
+
 	@Scenario("Missing project path on filesystem returns 404 with diagnostics")
 	static async missingProjectPathResponse(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
 		const input = scenario.input

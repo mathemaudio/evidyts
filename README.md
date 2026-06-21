@@ -1,6 +1,6 @@
 # EvidyTS
 
-EvidyTS is a stricter TypeScript dialect for AI-generated software.
+[EvidyTS](https://evidype.com/evidyts) is a stricter TypeScript dialect/compiler for AI-generated software.
 
 It keeps the syntax large language models already know, then moves the parts of engineering that are
 easy to forget into deterministic compiler pressure: visible specs, predictable structure, companion

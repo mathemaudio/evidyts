@@ -239,7 +239,8 @@ export class OverlayScenarioRuntime {
 		return async (filePath: string): Promise<void> => {
 			const globalScope = globalThis as typeof globalThis & { FIXED_llltsTakeScreenshot?: (filePath: string) => Promise<void> }
 			if (typeof globalScope.FIXED_llltsTakeScreenshot !== "function") {
-				throw new Error("Browser tunnel unavailable: scenario.screenshot(path) can only capture screenshots while behavioral tests run through --clientTunnel.")
+				console.warn(`Skipping scenario screenshot '${filePath}' because screenshots are only captured during --clientTunnel runs.`)
+				return
 			}
 			await globalScope.FIXED_llltsTakeScreenshot(filePath)
 		}

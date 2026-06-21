@@ -275,14 +275,14 @@ export class ClientTunnelRunner {
 		return { text, location }
 	}
 
-	@Spec("Ignores known third-party dev-server noise that should not fail behavioral runs.")
+	@Spec("Ignores browser-generated console noise that should not fail behavioral runs.")
 	private shouldIgnoreConsoleErrorText(
 		text: string,
 		location?: NonNullable<ClientTunnelRunResult["consoleErrors"]>[number]["location"]
 	): boolean {
 		return (
 			this.isViteLocalhostWebsocketConsoleError(text, location)
-			|| this.isViteLocalhostBadGatewayConsoleError(text, location)
+			|| this.isBrowserGeneratedHttpStatusConsoleError(text, location)
 		)
 	}
 
@@ -298,16 +298,26 @@ export class ClientTunnelRunner {
 		)
 	}
 
-	@Spec("Recognizes transient Vite dev-client asset fetch 502 noise on localhost.")
-	private isViteLocalhostBadGatewayConsoleError(
+	@Spec("Recognizes browser-generated HTTP status resource messages that are not runtime errors.")
+	private isBrowserGeneratedHttpStatusConsoleError(
 		text: string,
 		location?: NonNullable<ClientTunnelRunResult["consoleErrors"]>[number]["location"]
 	): boolean {
 		return (
-			text.startsWith("Failed to load resource: the server responded with a status of 502")
-			&& typeof location?.url === "string"
-			&& location.url.startsWith("http://localhost:")
-			&& this.isViteOwnedLocalhostLocation(location)
+			/^Failed to load resource: the server responded with a status of [45]\d{2}(?: \([^)]+\))?$/.test(text)
+			&& this.isBrowserResourceStatusLocation(location)
+		)
+	}
+
+	@Spec("Recognizes Chrome resource-status locations so matching user console.error calls still fail.")
+	private isBrowserResourceStatusLocation(
+		location?: NonNullable<ClientTunnelRunResult["consoleErrors"]>[number]["location"]
+	): boolean {
+		return (
+			typeof location?.url === "string"
+			&& location.url.length > 0
+			&& location.lineNumber === 0
+			&& location.columnNumber === 0
 		)
 	}
 
@@ -316,27 +326,6 @@ export class ClientTunnelRunner {
 		location?: NonNullable<ClientTunnelRunResult["consoleErrors"]>[number]["location"]
 	): boolean {
 		return typeof location?.url === "string" && location.url.includes("@vite")
-	}
-
-	@Spec("Treats Vite assets and the automatic overlay page as the same localhost dev-server surface.")
-	private isViteOwnedLocalhostLocation(
-		location?: NonNullable<ClientTunnelRunResult["consoleErrors"]>[number]["location"]
-	): boolean {
-		return this.isViteLocation(location) || this.isAutomaticTunnelLocation(location)
-	}
-
-	@Spec("Recognizes the automatic tunnel page URL used by the overlay runner.")
-	private isAutomaticTunnelLocation(
-		location?: NonNullable<ClientTunnelRunResult["consoleErrors"]>[number]["location"]
-	): boolean {
-		if (typeof location?.url !== "string" || !location.url.startsWith("http://localhost:")) {
-			return false
-		}
-		try {
-			return new URL(location.url).searchParams.get("automatic") === "true"
-		} catch {
-			return location.url.includes("automatic=true")
-		}
 	}
 
 	@Spec("Applies a short delay so browser-side runtime errors can arrive before inspection.")
