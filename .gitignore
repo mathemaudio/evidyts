@@ -29,3 +29,7 @@ llm-raw-stream.txt
 
 
 .lll/snapshots
+
+.lll/bootstrap.log
+
+.lll/runtime-location.json

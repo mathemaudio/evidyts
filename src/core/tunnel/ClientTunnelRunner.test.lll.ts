@@ -418,8 +418,8 @@ export class ClientTunnelRunnerTest {
 		const fixture = this.createRunner()
 		await fixture.runner.run({ url: "http://localhost:3000/tunnel", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(
-			fixture.state.visitedUrl === "http://localhost:3000/tunnel?automatic=true&stepTimeoutMs=10000",
-			"Expected tunnel runner to append automatic and capped per-step timeout query params when query string is absent"
+			fixture.state.visitedUrl === "http://localhost:3000/tunnel?automatic=true&stepTimeoutMs=30000",
+			"Expected tunnel runner to append automatic and default test timeout query params when query string is absent"
 		)
 	}
 
@@ -431,21 +431,39 @@ export class ClientTunnelRunnerTest {
 		const fixture = this.createRunner()
 		await fixture.runner.run({ url: "http://localhost:3000/tunnel?foo=bar", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(
-			fixture.state.visitedUrl === "http://localhost:3000/tunnel?foo=bar&automatic=true&stepTimeoutMs=10000",
+			fixture.state.visitedUrl === "http://localhost:3000/tunnel?foo=bar&automatic=true&stepTimeoutMs=30000",
 			"Expected tunnel runner to preserve existing query params when adding automatic and per-step timeout query params"
 		)
 	}
 
-	@Scenario("Uses the requested tunnel timeout when it is already below the per-step cap")
+	@Scenario("Uses the requested test timeout for each browser test step")
 	static async preservesShortPerStepTimeout(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
 		const fixture = this.createRunner()
-		await fixture.runner.run({ url: "http://localhost:3000/tunnel", headed: false, timeoutMs: 4321, projectRoot: process.cwd() })
+		await fixture.runner.run({ url: "http://localhost:3000/tunnel", headed: false, timeoutMs: 60000, testTimeoutMs: 4321, projectRoot: process.cwd() })
 		assert(
 			fixture.state.visitedUrl === "http://localhost:3000/tunnel?automatic=true&stepTimeoutMs=4321",
 			"Expected tunnel runner to preserve shorter explicit timeouts for each automatic test step"
+		)
+	}
+
+	@Scenario("Forwards one selected test path to the automatic browser overlay")
+	static async forwardsSelectedTestPath(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const fixture = this.createRunner()
+		await fixture.runner.run({
+			url: "http://localhost:3000/tunnel",
+			headed: false,
+			timeoutMs: 60000,
+			testTimeoutMs: 40000,
+			testPath: "src/App.test.lll.ts",
+			projectRoot: process.cwd()
+		})
+		assert(
+			fixture.state.visitedUrl === "http://localhost:3000/tunnel?automatic=true&stepTimeoutMs=40000&testPath=src%2FApp.test.lll.ts",
+			"Expected the selected test path in the automatic browser URL"
 		)
 	}
 

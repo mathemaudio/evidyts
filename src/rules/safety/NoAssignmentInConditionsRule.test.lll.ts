@@ -1,5 +1,6 @@
 import { Project } from "ts-morph"
-import { AssertFn, Scenario, Spec, WaitForFn, ScenarioParameter, SubjectFactory } from "../../public/lll.lll"
+import { AssertFn, Scenario, Spec, WaitForFn, ScenarioParameter } from "../../public/lll.lll"
+import "./NoAssignmentInConditionsRule.lll"
 import { NoAssignmentInConditionsRule } from "./NoAssignmentInConditionsRule.lll"
 
 @Spec("Validates the ban on assignment expressions inside if conditions.")
@@ -14,7 +15,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Allows pure boolean checks inside if")
-	static async allowsPureBooleanChecks(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async allowsPureBooleanChecks(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -33,7 +34,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Rejects direct assignment inside if condition")
-	static async rejectsDirectAssignmentInsideIfCondition(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async rejectsDirectAssignmentInsideIfCondition(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -52,7 +53,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Rejects compound assignment nested inside if condition")
-	static async rejectsCompoundAssignmentNestedInsideIfCondition(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async rejectsCompoundAssignmentNestedInsideIfCondition(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -61,7 +62,7 @@ export class NoAssignmentInConditionsRuleTest {
 			`export class MathObject {
 	static main() {
 		let count = 0
-		if ((count ++) > 0) {
+		if ((count += 1) > 0) {
 			count = 10
 		}
 	}
@@ -71,7 +72,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Rejects logical assignment inside nested if expression")
-	static async rejectsLogicalAssignmentInsideNestedIfExpression(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async rejectsLogicalAssignmentInsideNestedIfExpression(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -91,7 +92,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Rejects assignment inside while condition")
-	static async rejectsAssignmentInsideWhileCondition(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async rejectsAssignmentInsideWhileCondition(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -110,7 +111,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Rejects assignment inside do while condition")
-	static async rejectsAssignmentInsideDoWhileCondition(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async rejectsAssignmentInsideDoWhileCondition(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -121,7 +122,7 @@ export class NoAssignmentInConditionsRuleTest {
 		let value = 0
 		do {
 			value = value + 1
-		} while ((value ++) < 4)
+		} while ((value += 1) < 4)
 	}
 }`
 		)
@@ -129,7 +130,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Rejects assignment inside for condition")
-	static async rejectsAssignmentInsideForCondition(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async rejectsAssignmentInsideForCondition(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -146,7 +147,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Rejects assignment inside ternary condition")
-	static async rejectsAssignmentInsideTernaryCondition(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async rejectsAssignmentInsideTernaryCondition(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -164,7 +165,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Rejects assignments across all supported condition positions")
-	static async rejectsAssignmentsAcrossAllSupportedConditionPositions(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async rejectsAssignmentsAcrossAllSupportedConditionPositions(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
@@ -176,7 +177,7 @@ export class NoAssignmentInConditionsRuleTest {
 		if (value = 1) {
 			value = 2
 		}
-		while ((value ++) < 4) {
+		while ((value += 1) < 4) {
 			value = value + 1
 		}
 		do {
@@ -193,7 +194,7 @@ export class NoAssignmentInConditionsRuleTest {
 	}
 
 	@Scenario("Allows assignments outside the ternary condition slot")
-	static async allowsAssignmentsOutsideTernaryConditionSlot(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
+	static async allowsAssignmentsOutsideTernaryConditionSlot(scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor

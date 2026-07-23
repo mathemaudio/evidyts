@@ -22,12 +22,14 @@ export class LLLTSTest {
 		input: {
 			hasBehavioralTests: boolean
 			ruleDiagnostics?: Array<{ severity: "error" | "warning" | "notice"; file: string; message: string; ruleCode: RuleCode; line?: number }>
-			tunnelRunner?: (runInput: { url: string; headed: boolean; timeoutMs: number; projectRoot: string }) => Promise<ClientTunnelRunResult>
+			testRunner?: (testTimeoutMs: number, testPath: string | null) => void
+			tunnelRunner?: (runInput: { url: string; headed: boolean; timeoutMs: number; testTimeoutMs?: number; testPath?: string | null; projectRoot: string }) => Promise<ClientTunnelRunResult>
 		},
 		callback: () => Promise<void>
 	): Promise<void> {
 		const originalRulesRunAll = RulesEngine.prototype.runAll
 		const originalInventory = TestRunner.prototype.summarizeInventory
+		const originalResolveTestPath = TestRunner.prototype.resolveTestPath
 		const originalRunAll = TestRunner.prototype.runAll
 		const originalTunnelRun = ClientTunnelRunner.prototype.run
 
@@ -42,11 +44,15 @@ export class LLLTSTest {
 					: []
 			}
 		}
-		TestRunner.prototype.runAll = async function stubRunAll() {
+		TestRunner.prototype.resolveTestPath = function stubResolveTestPath(testPath: string) {
+			return testPath
+		}
+		TestRunner.prototype.runAll = async function stubRunAll(testTimeoutMs = 30000, testPath: string | null = null) {
+			input.testRunner?.(testTimeoutMs, testPath)
 			return { diagnostics: [], reports: [] }
 		}
 		ClientTunnelRunner.prototype.run = async function stubTunnelRun(
-			runInput: { url: string; headed: boolean; timeoutMs: number; projectRoot: string }
+			runInput: { url: string; headed: boolean; timeoutMs: number; testTimeoutMs?: number; testPath?: string | null; projectRoot: string }
 		) {
 			if (!input.tunnelRunner) {
 				throw new Error("Unexpected tunnel runner invocation in this test")
@@ -59,6 +65,7 @@ export class LLLTSTest {
 		} finally {
 			RulesEngine.prototype.runAll = originalRulesRunAll
 			TestRunner.prototype.summarizeInventory = originalInventory
+			TestRunner.prototype.resolveTestPath = originalResolveTestPath
 			TestRunner.prototype.runAll = originalRunAll
 			ClientTunnelRunner.prototype.run = originalTunnelRun
 		}
@@ -115,6 +122,50 @@ export class LLLTSTest {
 		const result = await LLLTS.main([...this.baseCompileArgs(), "--clientTunnelTimeoutMs", "0"])
 		assert(result.mode === "compile", "Invalid timeout should still return compile result mode")
 		assert(result.exitCode === 1, "Invalid timeout should return non-zero compile exit code")
+	}
+
+	@Scenario("Invalid --testTimeoutMs returns compile failure")
+	static async invalidTestTimeout(scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const result = await LLLTS.main([...this.baseCompileArgs(), "--testTimeoutMs", "0"])
+		assert(result.mode === "compile", "Invalid test timeout should still return compile result mode")
+		assert(result.exitCode === 1, "Invalid test timeout should return non-zero compile exit code")
+	}
+
+	@Scenario("Missing --testPath value returns compile failure")
+	static async missingTestPath(scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const result = await LLLTS.main([...this.baseCompileArgs(), "--testPath"])
+		assert(result.mode === "compile", "Missing test path should still return compile result mode")
+		assert(result.exitCode === 1, "Missing test path should return non-zero compile exit code")
+	}
+
+	@Scenario("--testTimeoutMs is forwarded to the Node test runner")
+	static async testTimeoutIsForwardedToNodeRunner(scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		let observedTimeoutMs = 0
+		let observedTestPath: string | null = null
+		await this.withCompileStubs(
+			{
+				hasBehavioralTests: false,
+				testRunner: (testTimeoutMs, testPath) => {
+					observedTimeoutMs = testTimeoutMs
+					observedTestPath = testPath
+				}
+			},
+			async () => {
+				const result = await LLLTS.main([
+					...this.baseCompileArgs(),
+					"--testTimeoutMs", "30000",
+					"--testPath", "src/Default.test.lll.ts",
+					"--testTimeoutMs", "10000",
+					"--testPath", "src/Selected.test.lll.ts"
+				])
+				assert(result.mode === "compile" && result.exitCode === 0, "Valid test timeout should keep compile successful")
+			}
+		)
+		assert(observedTimeoutMs === 10000, "Test timeout flag should be forwarded into the Node test runner")
+		assert(observedTestPath === "src/Selected.test.lll.ts", "Test path flag should be forwarded into the Node test runner")
 	}
 
 	@Scenario("Coverage debt warning keeps compile successful and prints success footer")
@@ -843,7 +894,7 @@ export class LLLTSTest {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
-		const calls: Array<{ url: string; headed: boolean; timeoutMs: number; projectRoot: string }> = []
+		const calls: Array<{ url: string; headed: boolean; timeoutMs: number; testTimeoutMs?: number; testPath?: string | null; projectRoot: string }> = []
 		await this.withCompileStubs(
 			{
 				hasBehavioralTests: true,
@@ -857,7 +908,9 @@ export class LLLTSTest {
 					...this.baseCompileArgs(),
 					"--clientTunnel", "http://localhost:3000",
 					"--clientTunnelHeaded",
-					"--clientTunnelTimeoutMs", "1234"
+					"--clientTunnelTimeoutMs", "1234",
+					"--testTimeoutMs", "40000",
+					"--testPath", "src/BehavioralSuite.test.lll.ts"
 				])
 				assert(result.mode === "compile", "Compile mode should run for tunnel args")
 				assert(result.exitCode === 0, "Passing tunnel run should keep compile successful")
@@ -868,6 +921,8 @@ export class LLLTSTest {
 		assert(calls[0].url === "http://localhost:3000", "Tunnel URL should be forwarded into tunnel runner")
 		assert(calls[0].headed === true, "Headed flag should be forwarded into tunnel runner")
 		assert(calls[0].timeoutMs === 1234, "Timeout flag should be forwarded into tunnel runner")
+		assert(calls[0].testTimeoutMs === 40000, "Test timeout flag should be forwarded into tunnel runner")
+		assert(calls[0].testPath === "src/BehavioralSuite.test.lll.ts", "Test path flag should be forwarded into tunnel runner")
 		assert(calls[0].projectRoot === process.cwd(), "Project root should be forwarded into tunnel runner")
 	}
 

@@ -14,7 +14,7 @@ const args = process.argv.slice(2)
 if (!scriptPath) {
 	console.error(
 		`evidyts: expected compiled entry at one of:\n${scriptCandidates.map((candidate) => `  - ${candidate}`).join('\n')}\n` +
-		'Run `npm run build` (or equivalent) to generate the compiler before using this command.'
+		'Run `pnpm run build` to generate the compiler before using this command.'
 	)
 	process.exit(1)
 }

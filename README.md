@@ -217,6 +217,8 @@ Common options:
 pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --verbose
 pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --noTests
 pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --fail-safe
+pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --testTimeoutMs 40000
+pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --testPath src/App.test.lll.ts
 pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --clientTunnel http://localhost:54300
 pnpm exec evidyts --project tsconfig.json --entry src/App.lll.ts --clientTunnel http://localhost:54300 --clientTunnelHeaded
 ```

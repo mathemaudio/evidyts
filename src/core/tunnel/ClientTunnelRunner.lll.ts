@@ -22,6 +22,7 @@ export class ClientTunnelRunner {
 
 	@Spec("Launches browser, waits for the fixed report variable, and returns parsed behavioral status.")
 	public async run(input: ClientTunnelRunInput): Promise<ClientTunnelRunResult> {
+		const testTimeoutMs = this.resolveTestTimeoutMs(input.testTimeoutMs)
 		const consoleErrors: NonNullable<ClientTunnelRunResult["consoleErrors"]> = []
 		let currentPhase: NonNullable<ClientTunnelRunResult["consoleErrors"]>[number]["phase"] = "preflight"
 		let browser: Browser | null = null
@@ -50,10 +51,10 @@ export class ClientTunnelRunner {
 				lastProgressContext = progressContext
 			})
 			await this.exposeScreenshotBinding(page, input.projectRoot)
-			const automaticUrl = this.buildAutomaticTunnelUrl(input.url, this.resolvePerStepTimeoutMs(input.timeoutMs))
+			const automaticUrl = this.buildAutomaticTunnelUrl(input.url, testTimeoutMs, input.testPath)
 			this.attachConsoleErrorListeners(page, consoleErrors, () => currentPhase)
 
-			await page.goto(automaticUrl, { waitUntil: "domcontentloaded" })
+			await page.goto(automaticUrl, { waitUntil: "domcontentloaded", timeout: input.timeoutMs })
 			await this.waitForConsoleStabilization()
 			const preflightConsoleErrors = this.filterConsoleErrorsByPhase(consoleErrors, "preflight")
 			if (preflightConsoleErrors.length > 0) {
@@ -67,7 +68,7 @@ export class ClientTunnelRunner {
 			timeoutPhase = "scenario"
 			await page.waitForFunction(
 				() => typeof (globalThis as typeof globalThis & { FIXED_llltsLastRunReport?: unknown }).FIXED_llltsLastRunReport === "string",
-				{ timeout: input.timeoutMs }
+				{ timeout: testTimeoutMs }
 			)
 
 			const reportTextRaw = await page.evaluate(
@@ -380,26 +381,33 @@ export class ClientTunnelRunner {
 	}
 
 	@Spec("Appends the browser auto-run query flag while preserving the rest of the tunnel URL.")
-	private buildAutomaticTunnelUrl(url: string, stepTimeoutMs: number): string {
+	private buildAutomaticTunnelUrl(url: string, stepTimeoutMs: number, testPath?: string | null): string {
 		const automatic_url_key = "automatic"
 		const step_timeout_url_key = "stepTimeoutMs"
+		const test_path_url_key = "testPath"
 		try {
 			const parsedUrl = new URL(url)
 			parsedUrl.searchParams.set(automatic_url_key, "true")
 			parsedUrl.searchParams.set(step_timeout_url_key, String(stepTimeoutMs))
+			if (typeof testPath === "string" && testPath.length > 0) {
+				parsedUrl.searchParams.set(test_path_url_key, testPath)
+			}
 			return parsedUrl.toString()
 		} catch {
 			const separator = url.includes("?") ? "&" : "?"
-			return `${url}${separator}${automatic_url_key}=true&${step_timeout_url_key}=${stepTimeoutMs}`
+			const testPathQuery = typeof testPath === "string" && testPath.length > 0
+				? `&${test_path_url_key}=${encodeURIComponent(testPath)}`
+				: ""
+			return `${url}${separator}${automatic_url_key}=true&${step_timeout_url_key}=${stepTimeoutMs}${testPathQuery}`
 		}
 	}
 
-	@Spec("Caps each browser-side test or scenario step so one hung item cannot consume the full tunnel timeout budget.")
-	private resolvePerStepTimeoutMs(timeoutMs: number): number {
-		if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-			return 10000
+	@Spec("Resolves the timeout applied to each browser-side test setup and scenario.")
+	private resolveTestTimeoutMs(testTimeoutMs?: number): number {
+		if (typeof testTimeoutMs !== "number" || !Number.isFinite(testTimeoutMs) || testTimeoutMs <= 0) {
+			return 30000
 		}
-		return Math.min(timeoutMs, 10000)
+		return testTimeoutMs
 	}
 
 	@Spec("Maps browser/runtime errors into deterministic tunnel statuses.")

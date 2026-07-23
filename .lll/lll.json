@@ -9,6 +9,5 @@
 	"serverPort": 0,
 	"tunnelPort": 0,
 	"initialPrompt": ".",
-	"initialComposerAttachments": [],
-	"promptProgressState": ""
+	"initialComposerAttachments": []
 }

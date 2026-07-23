@@ -713,7 +713,9 @@
       __publicField(this, "terminalPopup", null);
       __publicField(this, "terminalPopupBody", null);
       __publicField(this, "terminalPopupClose", null);
-      this.tests = Array.isArray(config.tests) ? config.tests.map((testPath) => String(testPath ?? "")) : [];
+      const configuredTests = Array.isArray(config.tests) ? config.tests.map((testPath) => String(testPath ?? "")) : [];
+      const selectedTestPath = this.getConfiguredTestPath();
+      this.tests = selectedTestPath === null ? configuredTests : configuredTests.filter((testPath) => testPath === selectedTestPath);
       this.openByDefault = !!config.openByDefault;
     }
     getVersionLabel() {
@@ -854,6 +856,14 @@
         return currentUrl.searchParams.get("automatic") === "true";
       } catch {
         return false;
+      }
+    }
+    getConfiguredTestPath() {
+      try {
+        const testPath = new URL(window.location.href).searchParams.get("testPath")?.trim() ?? "";
+        return testPath.length > 0 ? testPath : null;
+      } catch {
+        return null;
       }
     }
     getConfiguredStepTimeoutMs() {

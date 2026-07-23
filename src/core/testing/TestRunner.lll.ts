@@ -80,10 +80,11 @@ export class TestRunner {
 	}
 
 	@Spec("Executes every discovered test class and returns diagnostics.")
-	public async runAll(): Promise<TestRunnerResult> {
+	public async runAll(testTimeoutMs = 30000, testPath: string | null = null): Promise<TestRunnerResult> {
 		const diagnostics: DiagnosticObject[] = []
 		const reports: TestReport[] = []
-		const testClasses = this.listTestClasses()
+		const testRunStartedAt = Date.now()
+		const testClasses = this.listTestClasses(testPath)
 
 		for (const testClass of testClasses) {
 			const { file, exportedClass, className, relativeFile } = testClass
@@ -137,8 +138,27 @@ export class TestRunner {
 					scenarioName,
 					line: entry.method.getStartLineNumber()
 				}
+				const remainingTimeoutMs = testTimeoutMs - (Date.now() - testRunStartedAt)
+				if (remainingTimeoutMs <= 0) {
+					diagnostics.push(this.createTestRunTimeoutDiagnostic(context, testTimeoutMs))
+					report.scenarios.push({
+						id: entry.metadata.id,
+						title: entry.metadata.title,
+						name: scenarioName,
+						status: "failed"
+					})
+					reports.push(report)
+					return { diagnostics, reports }
+				}
 
-				const failure = await this.runScenarioUnit(context, runtimeClass, hostKind, runtimeHostClass)
+				const failure = await this.runScenarioUnit(
+					context,
+					runtimeClass,
+					hostKind,
+					runtimeHostClass,
+					remainingTimeoutMs,
+					testTimeoutMs
+				)
 				report.scenarios.push({
 					id: entry.metadata.id,
 					title: entry.metadata.title,
@@ -148,6 +168,10 @@ export class TestRunner {
 
 				if (failure !== null) {
 					diagnostics.push(failure)
+					if (failure.message.includes("Test run timed out after")) {
+						reports.push(report)
+						return { diagnostics, reports }
+					}
 				}
 			}
 
@@ -158,9 +182,9 @@ export class TestRunner {
 	}
 
 	@Spec("Builds deterministic inventory data for behavioral test classes.")
-	public summarizeInventory(): TestInventorySummary {
+	public summarizeInventory(testPath: string | null = null): TestInventorySummary {
 		const behavioralTests: BehavioralTestReference[] = []
-		const testClasses = this.listTestClasses()
+		const testClasses = this.listTestClasses(testPath)
 
 		for (const testClass of testClasses) {
 			const testType = this.getTestTypeLiteral(testClass.exportedClass)
@@ -190,6 +214,15 @@ export class TestRunner {
 			hasBehavioralTests: behavioralTests.length > 0,
 			behavioralTests
 		}
+	}
+
+	@Spec("Resolves an absolute or project-relative test selector to its canonical project-relative path.")
+	public resolveTestPath(requestedTestPath: string): string | null {
+		const requestedAbsolutePath = path.isAbsolute(requestedTestPath)
+			? path.resolve(requestedTestPath)
+			: path.resolve(this.projectRoot, requestedTestPath)
+		const matchedTest = this.listTestClasses().find(testClass => path.resolve(testClass.file.getFilePath()) === requestedAbsolutePath)
+		return matchedTest?.relativeFile ?? null
 	}
 
 	@Spec("Reads compiler options for locating compiled files.")
@@ -251,7 +284,7 @@ export class TestRunner {
 	}
 
 	@Spec("Collects executable test classes from discovered companion test files in deterministic order.")
-	private listTestClasses(): TestClassRecord[] {
+	private listTestClasses(testPath: string | null = null): TestClassRecord[] {
 		const records: TestClassRecord[] = []
 		const files = this.loader.getFiles()
 
@@ -279,7 +312,7 @@ export class TestRunner {
 			})
 		}
 
-		return records.sort((a, b) => {
+		const sortedRecords = records.sort((a, b) => {
 			const byPath = a.relativeFile.localeCompare(b.relativeFile)
 			if (byPath !== 0) {
 				return byPath
@@ -290,6 +323,10 @@ export class TestRunner {
 			}
 			return a.className.localeCompare(b.className)
 		})
+		if (testPath === null) {
+			return sortedRecords
+		}
+		return sortedRecords.filter(record => record.relativeFile === testPath)
 	}
 
 	@Spec("Requires the compiled JS module and returns the requested exported binding.")
@@ -327,7 +364,9 @@ export class TestRunner {
 		context: ScenarioContext,
 		runtimeClass: Record<string, unknown>,
 		hostKind: PairedHostKind,
-		runtimeHostClass: Record<string, unknown> | null
+		runtimeHostClass: Record<string, unknown> | null,
+		timeoutMs = 30000,
+		testRunTimeoutMs = timeoutMs
 	): Promise<DiagnosticObject | null> {
 		const capturedLogs: string[] = []
 		const restoreConsole = this.hookConsole(capturedLogs)
@@ -340,20 +379,27 @@ export class TestRunner {
 			}
 
 			try {
-				if (hostKind === "static-only") {
-					await Reflect.apply(
-						scenarioFn as (scenario: ScenarioParameter) => Promise<unknown> | unknown,
-						runtimeClass,
-						[scenario]
-					)
-				} else {
-					const subjectFactory = this.createSubjectFactory(runtimeHostClass, context)
-					await Reflect.apply(
-						scenarioFn as (subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) => Promise<unknown> | unknown,
-						runtimeClass,
-						[subjectFactory, scenario]
-					)
+				const executeScenario = async (): Promise<void> => {
+					if (hostKind === "static-only") {
+						await Reflect.apply(
+							scenarioFn as (scenario: ScenarioParameter) => Promise<unknown> | unknown,
+							runtimeClass,
+							[scenario]
+						)
+					} else {
+						const subjectFactory = this.createSubjectFactory(runtimeHostClass, context)
+						await Reflect.apply(
+							scenarioFn as (subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) => Promise<unknown> | unknown,
+							runtimeClass,
+							[subjectFactory, scenario]
+						)
+					}
 				}
+				await this.runWithTimeout(
+					executeScenario,
+					timeoutMs,
+					`Test run timed out after ${testRunTimeoutMs}ms while running scenario "${context.scenarioName}" in ${context.filePath}.`
+				)
 			} catch (error) {
 				return this.buildDiagnostic(context, "scenario", error, capturedLogs, "")
 			}
@@ -361,6 +407,34 @@ export class TestRunner {
 			return null
 		} finally {
 			restoreConsole()
+		}
+	}
+
+	@Spec("Builds a diagnostic when the shared test-run deadline expires between unit scenarios.")
+	private createTestRunTimeoutDiagnostic(context: ScenarioContext, testTimeoutMs: number): DiagnosticObject {
+		return this.buildDiagnostic(
+			context,
+			"scenario",
+			new Error(`Test run timed out after ${testTimeoutMs}ms before scenario "${context.scenarioName}" could start.`),
+			[],
+			""
+		)
+	}
+
+	@Spec("Bounds one unit scenario so a stuck test cannot block the compiler run indefinitely.")
+	private async runWithTimeout<T>(promiseFactory: () => Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+		let timeoutHandle: NodeJS.Timeout | null = null
+		try {
+			return await Promise.race([
+				Promise.resolve().then(() => promiseFactory()),
+				new Promise<T>((_resolve, reject) => {
+					timeoutHandle = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)
+				})
+			])
+		} finally {
+			if (timeoutHandle !== null) {
+				clearTimeout(timeoutHandle)
+			}
 		}
 	}
 

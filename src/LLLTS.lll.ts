@@ -32,6 +32,18 @@ export class LLLTS {
 		const verbose = this.hasFlag(args, "--verbose")
 		const noTests = this.hasFlag(args, "--noTests")
 		const failSafeMode = this.hasFlag(args, "--fail-safe")
+		const testPathResult = this.parseOptionalArgValue(args, "--testPath")
+		if (!testPathResult.valid) {
+			console.error(`\n❌ ${testPathResult.error}`)
+			return { mode: "compile", exitCode: 1 }
+		}
+		const requestedTestPath = testPathResult.value
+		const testTimeoutResult = this.parseOptionalPositiveIntegerArg(args, "--testTimeoutMs", 30000)
+		if (!testTimeoutResult.valid) {
+			console.error(`\n❌ ${testTimeoutResult.error}`)
+			return { mode: "compile", exitCode: 1 }
+		}
+		const testTimeoutMs = testTimeoutResult.value
 		const clientTunnelConfigResult = this.parseClientTunnelConfig(args)
 		if (!clientTunnelConfigResult.valid) {
 			console.error(`\n❌ ${clientTunnelConfigResult.error}`)
@@ -64,14 +76,20 @@ export class LLLTS {
 		}
 		let scenarioDiagnostics: import("./core/DiagnosticObject").DiagnosticObject[] = []
 		let reports: TestReport[] = []
+		let selectedTestPath: string | null = null
 		const skipNodeTestExecution = clientTunnelConfig.url !== null
 		if (!noTests) {
 			const testRunner = new TestRunner(loader, projectPath)
-			inventory = testRunner.summarizeInventory()
-			if (!skipNodeTestExecution) {
-				const testRunResult = await testRunner.runAll()
-				scenarioDiagnostics = testRunResult.diagnostics
-				reports = testRunResult.reports
+			selectedTestPath = requestedTestPath === null ? null : testRunner.resolveTestPath(requestedTestPath)
+			if (requestedTestPath !== null && selectedTestPath === null) {
+				scenarioDiagnostics.push(this.createTestPathNotFoundDiagnostic(requestedTestPath))
+			} else {
+				inventory = testRunner.summarizeInventory(selectedTestPath)
+				if (!skipNodeTestExecution) {
+					const testRunResult = await testRunner.runAll(testTimeoutMs, selectedTestPath)
+					scenarioDiagnostics = testRunResult.diagnostics
+					reports = testRunResult.reports
+				}
 			}
 		}
 
@@ -88,6 +106,8 @@ export class LLLTS {
 				url: clientTunnelConfig.url,
 				headed: clientTunnelConfig.headed,
 				timeoutMs: clientTunnelConfig.timeoutMs,
+				testTimeoutMs,
+				testPath: selectedTestPath,
 				projectRoot: loader.getProjectRootDir()
 			})
 			allDiagnostics.push(...this.mapClientTunnelResultToDiagnostics(clientTunnelResult, inventory))
@@ -108,6 +128,15 @@ export class LLLTS {
 
 		const diagnosticsFailed = allDiagnostics.some(r => r.severity === "error")
 		return { mode: "compile", exitCode: diagnosticsFailed || tunnelFailed ? 1 : 0 }
+	}
+
+	@Spec("Builds a compile diagnostic when --testPath does not match a discovered companion test file.")
+	private static createTestPathNotFoundDiagnostic(testPath: string): import('./core/DiagnosticObject').DiagnosticObject {
+		return BaseRule.createError(
+			testPath,
+			`Test path '${testPath}' was not found among the discovered companion test files. Pass a project-relative path such as 'src/App.test.lll.ts'.`,
+			"test-failure"
+		)
 	}
 
 	@Spec("Runs server mode when '--server' is present; returns null for compile mode.")
@@ -223,7 +252,7 @@ export class LLLTS {
 
 	@Spec("Parses an optional flag value and validates non-empty argument text.")
 	private static parseOptionalArgValue(args: string[], flag: string): { valid: true; value: string | null } | { valid: false; error: string } {
-		const i = args.indexOf(flag)
+		const i = args.lastIndexOf(flag)
 		if (i < 0) {
 			return { valid: true, value: null }
 		}
@@ -243,7 +272,7 @@ export class LLLTS {
 		flag: string,
 		defaultValue: number
 	): { valid: true; value: number } | { valid: false; error: string } {
-		const i = args.indexOf(flag)
+		const i = args.lastIndexOf(flag)
 		if (i < 0) {
 			return { valid: true, value: defaultValue }
 		}

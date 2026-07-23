@@ -80,6 +80,16 @@ export class AppTest2 {
 		}
 	}
 
+	@Scenario('resolves and filters one project-relative companion test path')
+	static async resolvesSelectedTestPath(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const runner = new TestRunner(new ProjectInitiator('./tsconfig.json', 'from_imports', 'src/LLLTS.lll.ts'), './tsconfig.json')
+		const selectedPath = runner.resolveTestPath('src/LLLTS.test.lll.ts')
+		const missingPath = runner.resolveTestPath('src/Missing.test.lll.ts')
+		assert(selectedPath === 'src/LLLTS.test.lll.ts', 'Expected a discovered project-relative test path to resolve canonically')
+		assert(missingPath === null, 'Expected an undiscovered test path not to resolve')
+	}
+
 	@Scenario('passes ScenarioParameter into static-only unit scenarios')
 	static async passesScenarioParameterToStaticOnlyUnitScenarios(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
 		const assert: AssertFn = scenario.assert
@@ -162,6 +172,42 @@ export class AppTest2 {
 
 		assert(diagnostic !== null, 'Expected unit screenshot use to produce a diagnostic')
 		assert(diagnostic.message.includes('Browser tunnel unavailable'), 'Expected screenshot diagnostic to explain that the browser tunnel is unavailable')
+	}
+
+	@Scenario('times out a stuck unit scenario using the configured test timeout')
+	static async timesOutStuckUnitScenario(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const runner = new TestRunner(new ProjectInitiator('./tsconfig.json', 'from_imports', 'src/examples/MathObject.lll.ts'), './tsconfig.json')
+		const runtimeClass = {
+			async neverFinishes(): Promise<void> {
+				await new Promise<void>(() => undefined)
+			}
+		}
+
+		const diagnostic = await (runner as unknown as {
+			runScenarioUnit: (
+				context: { scenarioMethodName: string; className: string; scenarioName: string; filePath: string; line: number },
+				runtimeClass: Record<string, unknown>,
+				hostKind: 'instantiable' | 'static-only',
+				runtimeHostClass: Record<string, unknown> | null,
+				testTimeoutMs: number
+			) => Promise<DiagnosticObject | null>
+		}).runScenarioUnit(
+			{
+				scenarioMethodName: 'neverFinishes',
+				className: 'StuckTest',
+				scenarioName: 'never finishes',
+				filePath: 'src/Stuck.test.lll.ts',
+				line: 1
+			},
+			runtimeClass,
+			'static-only',
+			null,
+			5
+		)
+
+		assert(diagnostic !== null, 'Expected a stuck unit scenario to produce a timeout diagnostic')
+		assert(diagnostic.message.includes('Test run timed out after 5ms'), 'Expected the diagnostic to report the configured test timeout')
 	}
 
 	@Scenario('passes subjectFactory into instantiable unit scenarios')

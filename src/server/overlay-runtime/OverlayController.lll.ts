@@ -51,7 +51,11 @@ export class OverlayController {
 	private terminalPopupClose: HTMLButtonElement | null = null
 
 	public constructor(private readonly config: Record<string, unknown>) {
-		this.tests = Array.isArray(config.tests) ? config.tests.map(testPath => String(testPath ?? "")) : []
+		const configuredTests = Array.isArray(config.tests) ? config.tests.map(testPath => String(testPath ?? "")) : []
+		const selectedTestPath = this.getConfiguredTestPath()
+		this.tests = selectedTestPath === null
+			? configuredTests
+			: configuredTests.filter(testPath => testPath === selectedTestPath)
 		this.openByDefault = !!config.openByDefault
 	}
 
@@ -230,6 +234,15 @@ export class OverlayController {
 			return currentUrl.searchParams.get("automatic") === "true"
 		} catch {
 			return false
+		}
+	}
+
+	private getConfiguredTestPath(): string | null {
+		try {
+			const testPath = new URL(window.location.href).searchParams.get("testPath")?.trim() ?? ""
+			return testPath.length > 0 ? testPath : null
+		} catch {
+			return null
 		}
 	}
 
