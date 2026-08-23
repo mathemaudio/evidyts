@@ -6,7 +6,9 @@ import { MustHaveExplicitReturnTypeRule } from "../../rules/documentation/MustHa
 import { MustHaveSpecHeaderRule } from "../../rules/documentation/MustHaveSpecHeaderRule.lll"
 import { MaxFileLengthRule } from "../../rules/limits/MaxFileLengthRule.lll"
 import { MaxFolderBreadthRule } from "../../rules/limits/MaxFolderBreadthRule.lll"
+import { MaxLineWidthRule } from "../../rules/formatting/MaxLineWidthRule.lll"
 import { MaxMethodLengthRule } from "../../rules/limits/MaxMethodLengthRule.lll"
+import { OneStatementPerLineRule } from "../../rules/formatting/OneStatementPerLineRule.lll"
 import { NoAnyRule } from "../../rules/safety/types/NoAnyRule.lll"
 import { NoAssignmentInConditionsRule } from "../../rules/safety/NoAssignmentInConditionsRule.lll"
 import { NoFloatingPromisesRule } from "../../rules/safety/promises/NoFloatingPromisesRule.lll"
@@ -52,6 +54,8 @@ export class RulesEngine {
 			MaxFileLengthRule.getRule(),
 			MaxMethodLengthRule.getRule(),
 			MaxFolderBreadthRule.getRule(),
+			MaxLineWidthRule.getRule(),
+			OneStatementPerLineRule.getRule(),
 			NoAssignmentInConditionsRule.getRule(),
 			NoLooseEqualityRule.getRule(),
 			NoImplicitTruthinessRule.getRule(),

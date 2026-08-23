@@ -339,6 +339,7 @@ export class LlltsServerTest {
 			assert(templateResponse.headers["expires"] === "0", "Overlay template route should expire immediately")
 			assert(templateResponse.body.includes("Project Tests"), "Overlay template should include test panel markup")
 			assert(templateResponse.body.includes("lllts-test-panel-version"), "Overlay template should include the version label slot")
+			assert(templateResponse.body.includes('role="tree"'), "Overlay test list should expose tree semantics")
 			assert(templateResponse.body.includes("lllts-test-popup-fullscreen"), "Overlay template should include the preview fullscreen button")
 			assert(!templateResponse.body.includes("lllts-test-toggle"), "Overlay template should not include toggle markup")
 
@@ -355,6 +356,8 @@ export class LlltsServerTest {
 			assert(scriptResponse.body.includes("FIXED_llltsRunProgressJson"), "Overlay script should expose fixed progress variable")
 			assert(scriptResponse.body.includes("setPreviewFullscreen"), "Overlay script should include fullscreen preview state wiring")
 			assert(scriptResponse.body.includes("handleDocumentKeydown"), "Overlay script should include Escape handling for fullscreen preview")
+			assert(scriptResponse.body.includes("renderTestTreeFolder"), "Overlay script should render tests as nested folders and files")
+			assert(scriptResponse.body.includes('aria-expanded'), "Overlay folder buttons should expose their expanded state")
 			assert(scriptResponse.body.includes("runPanelPlayAllSequence(true)"), "Overlay script should auto-run Play All on page load")
 
 			const scenariosScriptResponse = await this.request(app, "/__lllts-overlay/js/scenarios.js")
@@ -367,6 +370,7 @@ export class LlltsServerTest {
 			assert(styleResponse.contentType.includes("text/css"), "Overlay style route should return text/css")
 			assert(styleResponse.body.includes("#lllts-test-panel"), "Overlay stylesheet should include panel styles")
 			assert(styleResponse.body.includes("lllts-preview-fullscreen"), "Overlay stylesheet should include preview fullscreen styles")
+			assert(styleResponse.body.includes("lllts-test-tree-folder-button"), "Overlay stylesheet should include folder tree styles")
 			assert(styleResponse.body.includes("#lllts-test-popup-actions"), "Overlay stylesheet should include popup action row styles")
 			assert(!styleResponse.body.includes("#lllts-test-toggle"), "Overlay stylesheet should not include toggle styles")
 		} finally {
@@ -421,6 +425,42 @@ export class LlltsServerTest {
 			assert(response.headers["cache-control"] === "no-store, no-cache, must-revalidate, proxy-revalidate", "Tunnel asset proxy should disable caching")
 			assert(response.body === "plain-asset-body", "Non-HTML upstream body should be preserved without modification")
 			assert(!response.body.includes("LLLTS_TEST_OVERLAY"), "Overlay should not be injected into non-HTML responses")
+		} finally {
+			await upstream.close()
+			fs.rmSync(tempRoot, { recursive: true, force: true })
+		}
+	}
+
+	@Scenario("Repeated asset requests reuse one cached project inspection")
+	static async repeatedAssetRequestsReuseProjectInspection(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lllts-server-cache-"))
+		const testFile = path.join(tempRoot, "src", "Cached.test.lll.ts")
+		fs.mkdirSync(path.dirname(testFile), { recursive: true })
+		fs.writeFileSync(testFile, "export class CachedTest {}\n")
+		const upstream = await this.startUpstreamServer((_req, res) => {
+			res.statusCode = 200
+			res.setHeader("content-type", "application/javascript; charset=utf-8")
+			res.end("export const cached = true\n")
+		})
+
+		try {
+			const server = new LlltsServer()
+			const originalInspectProjectPath = server.inspectProjectPath.bind(server)
+			let inspectionCount = 0
+			server.inspectProjectPath = (projectPathInput: string) => {
+				inspectionCount += 1
+				return originalInspectProjectPath(projectPathInput)
+			}
+			const app = server.createApp({
+				projectPath: tempRoot,
+				projectClientLink: upstream.url
+			})
+
+			const firstResponse = await this.request(app, "/src/First.lll.ts")
+			const secondResponse = await this.request(app, "/src/Second.lll.ts")
+			assert(firstResponse.status === 200 && secondResponse.status === 200, "Repeated asset requests should both reach the upstream client")
+			assert(inspectionCount === 1, "Project test discovery should run once when the application cache is created, not once per asset request")
 		} finally {
 			await upstream.close()
 			fs.rmSync(tempRoot, { recursive: true, force: true })

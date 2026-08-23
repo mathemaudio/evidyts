@@ -1,4 +1,5 @@
 import type { ClientTunnelRunStatus } from "./ClientTunnelRunStatus"
+import type { ClientTunnelTimings } from "./ClientTunnelTimings"
 import { Spec } from "../../public/lll.lll"
 
 Spec("Result payload returned by the client tunnel runner.")
@@ -7,6 +8,7 @@ export type ClientTunnelRunResult = {
 	reportText?: string
 	reportJson?: unknown
 	message?: string
+	timings?: ClientTunnelTimings
 	timeoutContext?: {
 		phase: "navigation" | "scenario"
 		testPath?: string

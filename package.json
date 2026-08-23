@@ -1,6 +1,6 @@
 {
 	"name": "lllts",
-	"version": "0.1.45",
+	"version": "0.2.03",
 	"description": "EvidyTS: the stricter TypeScript compiler/dialect behind Evidype",
 	"license": "GPL-3.0-or-later",
 	"main": "dist/LLLTS.bundle.cjs",

@@ -221,7 +221,7 @@ export class OverlayScenarioRuntime {
 	private static createScenarioWaitFor(): (predicate: () => unknown, message: unknown, timeoutMs?: number, intervalMs?: number) => Promise<void> {
 		return async (predicate: () => unknown, message: unknown, timeoutMs?: number, intervalMs?: number) => {
 			const effectiveTimeoutMs = typeof timeoutMs === "number" ? timeoutMs : 1200
-			const effectiveIntervalMs = typeof intervalMs === "number" ? intervalMs : 20
+			const effectiveIntervalMs = typeof intervalMs === "number" ? intervalMs : 5
 			const startTime = Date.now()
 			while (Date.now() - startTime < effectiveTimeoutMs) {
 				if (await predicate()) {

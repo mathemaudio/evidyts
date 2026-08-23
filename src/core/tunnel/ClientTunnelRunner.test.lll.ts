@@ -418,8 +418,8 @@ export class ClientTunnelRunnerTest {
 		const fixture = this.createRunner()
 		await fixture.runner.run({ url: "http://localhost:3000/tunnel", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(
-			fixture.state.visitedUrl === "http://localhost:3000/tunnel?automatic=true&stepTimeoutMs=30000",
-			"Expected tunnel runner to append automatic and default test timeout query params when query string is absent"
+			fixture.state.visitedUrl === "http://localhost:3000/tunnel?automatic=true&stepTimeoutMs=15000",
+			"Expected tunnel runner to append automatic and default per-scenario timeout query params when query string is absent"
 		)
 	}
 
@@ -431,21 +431,30 @@ export class ClientTunnelRunnerTest {
 		const fixture = this.createRunner()
 		await fixture.runner.run({ url: "http://localhost:3000/tunnel?foo=bar", headed: false, timeoutMs: 60000, projectRoot: process.cwd() })
 		assert(
-			fixture.state.visitedUrl === "http://localhost:3000/tunnel?foo=bar&automatic=true&stepTimeoutMs=30000",
+			fixture.state.visitedUrl === "http://localhost:3000/tunnel?foo=bar&automatic=true&stepTimeoutMs=15000",
 			"Expected tunnel runner to preserve existing query params when adding automatic and per-step timeout query params"
 		)
 	}
 
-	@Scenario("Uses the requested test timeout for each browser test step")
+	@Scenario("Sends the per-scenario timeout to the browser and keeps the suite budget out of it")
 	static async preservesShortPerStepTimeout(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
 		const input = scenario.input
 		const assert: AssertFn = scenario.assert
 		const waitFor: WaitForFn = scenario.waitFor
 		const fixture = this.createRunner()
-		await fixture.runner.run({ url: "http://localhost:3000/tunnel", headed: false, timeoutMs: 60000, testTimeoutMs: 4321, projectRoot: process.cwd() })
+		// The whole-suite budget is deliberately much larger than the per-scenario timeout: only the
+		// per-scenario value may bound one browser step, otherwise a long suite hides a stuck scenario.
+		await fixture.runner.run({
+			url: "http://localhost:3000/tunnel",
+			headed: false,
+			timeoutMs: 60000,
+			testTimeoutMs: 600000,
+			scenarioTimeoutMs: 4321,
+			projectRoot: process.cwd()
+		})
 		assert(
 			fixture.state.visitedUrl === "http://localhost:3000/tunnel?automatic=true&stepTimeoutMs=4321",
-			"Expected tunnel runner to preserve shorter explicit timeouts for each automatic test step"
+			"Expected the browser step timeout to come from --scenarioTimeoutMs, not the whole-suite budget"
 		)
 	}
 
@@ -457,7 +466,8 @@ export class ClientTunnelRunnerTest {
 			url: "http://localhost:3000/tunnel",
 			headed: false,
 			timeoutMs: 60000,
-			testTimeoutMs: 40000,
+			testTimeoutMs: 600000,
+			scenarioTimeoutMs: 40000,
 			testPath: "src/App.test.lll.ts",
 			projectRoot: process.cwd()
 		})

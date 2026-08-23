@@ -3,4 +3,5 @@ export type ScenarioReport = {
 	title?: string
 	name: string
 	status: "passed" | "failed"
+	durationMs: number
 }

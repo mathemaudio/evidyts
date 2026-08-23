@@ -1,15 +1,16 @@
 import express, { Express, Request, Response } from "express"
 import * as fs from "fs"
 import * as path from "path"
-import type { MethodDeclaration } from "ts-morph"
-import { Project } from "ts-morph"
+import { Readable } from "stream"
+import type { ReadableStream as NodeReadableStream } from "stream/web"
 import packageJson from "../../package.json"
 import { FileVariantSupport } from "../core/variants/FileVariantSupport.lll"
 import { Spec } from "../public/lll.lll"
 import type { ProjectReport } from "./ProjectReport"
+import type { ProjectReportCache } from "./ProjectReportCache"
+import { ProjectTestDiscovery } from "./ProjectTestDiscovery.lll"
 import type { ScenarioDescriptor } from "./ScenarioDescriptor"
 import type { ServerConfig } from "./ServerConfig"
-import type { TestDescriptor } from "./TestDescriptor"
 
 @Spec("Hosts the foreground HTTP server mode for lllts.")
 export class LlltsServer {
@@ -20,25 +21,82 @@ export class LlltsServer {
 	private static readonly overlayStyleAssetPath = "css/style.css"
 	private static readonly noStoreCacheControlValue = "no-store, no-cache, must-revalidate, proxy-revalidate"
 	private static readonly projectClientRetryIntervalMs = 2000
+	private readonly projectTestDiscovery = new ProjectTestDiscovery()
 
 	@Spec("Starts an express server that proxies a configured client and overlays discovered project tests.")
 	public async start(port: number, config: ServerConfig): Promise<number> {
-		const app = this.createApp(config)
+		const reportCache = this.createProjectReportCache(config.projectPath)
+		const app = this.createAppWithReportCache(config, reportCache)
+		const projectWatcher = this.watchProjectTests(config.projectPath, reportCache)
 		return new Promise((resolve, reject) => {
 			const server = app.listen(port, () => resolve(port))
-			server.on("error", reject)
+			server.on("close", () => projectWatcher?.close())
+			server.on("error", error => {
+				projectWatcher?.close()
+				reject(error)
+			})
 		})
 	}
 
 	@Spec("Creates and configures the express application.")
 	public createApp(config: ServerConfig): Express {
+		return this.createAppWithReportCache(config, this.createProjectReportCache(config.projectPath))
+	}
+
+	@Spec("Creates the express application around a shared project-report cache.")
+	private createAppWithReportCache(config: ServerConfig, reportCache: ProjectReportCache): Express {
 		const app = express()
 		this.registerOverlayAssetRoutes(app)
 		app.use(async (req: Request, res: Response) => {
-			await this.handleProxyRequest(req, res, config)
+			await this.handleProxyRequest(req, res, config, reportCache)
 		})
 
 		return app
+	}
+
+	@Spec("Creates one reusable project report for all requests handled by an application instance.")
+	private createProjectReportCache(projectPath: string): ProjectReportCache {
+		return {
+			report: this.inspectProjectPath(projectPath),
+			dirty: false,
+			refreshOnDocument: true
+		}
+	}
+
+	@Spec("Returns the cached project report, rebuilding it only after a relevant project change.")
+	private getProjectReport(projectPath: string, cache: ProjectReportCache): ProjectReport {
+		if (cache.dirty || !cache.report.exists || !cache.report.isDirectory) {
+			cache.report = this.inspectProjectPath(projectPath)
+			cache.dirty = false
+		}
+		return cache.report
+	}
+
+	@Spec("Invalidates cached test discovery when a supported test companion changes.")
+	private watchProjectTests(projectPathInput: string, cache: ProjectReportCache): fs.FSWatcher | null {
+		const projectPath = path.resolve(process.cwd(), projectPathInput)
+		if (!cache.report.exists || !cache.report.isDirectory) {
+			return null
+		}
+		try {
+			const watcher = fs.watch(projectPath, { recursive: true }, (_eventType, fileName) => {
+				const relativePath = this.projectTestDiscovery.normalizeRelativePath(String(fileName ?? ""))
+				if (relativePath.length === 0 || this.projectTestDiscovery.isIgnoredProjectRelativePath(relativePath)) {
+					return
+				}
+				if (FileVariantSupport.isTestFilePath(relativePath)) {
+					cache.dirty = true
+				}
+			})
+			cache.refreshOnDocument = false
+			watcher.on("error", () => {
+				cache.refreshOnDocument = true
+				watcher.close()
+			})
+			return watcher
+		} catch {
+			return null
+		}
 	}
 
 	@Spec("Registers static overlay asset routes served from local CDN files.")
@@ -97,8 +155,11 @@ export class LlltsServer {
 	}
 
 	@Spec("Handles one incoming request by validating project path and proxying to the configured client.")
-	private async handleProxyRequest(req: Request, res: Response, config: ServerConfig): Promise<void> {
-		const report = this.inspectProjectPath(config.projectPath)
+	private async handleProxyRequest(req: Request, res: Response, config: ServerConfig, reportCache: ProjectReportCache): Promise<void> {
+		if (reportCache.refreshOnDocument && this.isDocumentRequest(req)) {
+			reportCache.dirty = true
+		}
+		const report = this.getProjectReport(config.projectPath, reportCache)
 		if (!report.exists) {
 			this.applyNoStoreResponseHeaders(res)
 			res.status(404).type("text/plain").send(this.buildProjectPathStateResponse(report, config.projectClientLink, "Project path does not exist."))
@@ -142,22 +203,7 @@ export class LlltsServer {
 
 	@Spec("Resolves a project path and captures file-system facts plus discovered tests.")
 	public inspectProjectPath(projectPathInput: string): ProjectReport {
-		const resolvedPath = path.resolve(process.cwd(), projectPathInput)
-		const exists = fs.existsSync(resolvedPath)
-		const isDirectory = exists && fs.statSync(resolvedPath).isDirectory()
-		const projectName = path.basename(resolvedPath)
-		const tests = isDirectory ? this.findTestsWithScenarios(resolvedPath) : []
-		const testFiles = tests.map(test => test.path)
-		const testScenarios = this.mapScenariosByTest(tests)
-
-		return {
-			projectName,
-			projectPath: resolvedPath,
-			exists,
-			isDirectory,
-			testFiles,
-			testScenarios
-		}
+		return this.projectTestDiscovery.inspectProjectPath(projectPathInput)
 	}
 
 	@Spec("Builds deterministic plain-text output when project path preconditions are not satisfied.")
@@ -419,6 +465,16 @@ ${bodyMarkup}
 		return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(urlInput)
 	}
 
+	@Spec("Recognizes top-level HTML navigation so unsupported recursive watchers can refresh safely once per page load.")
+	private isDocumentRequest(req: Request): boolean {
+		const fetchDestination = String(req.headers["sec-fetch-dest"] ?? "").toLowerCase()
+		if (fetchDestination === "document") {
+			return true
+		}
+		const accept = String(req.headers.accept ?? "").toLowerCase()
+		return accept.includes("text/html")
+	}
+
 	@Spec("Builds request headers for upstream fetch while removing hop-by-hop values.")
 	private buildProxyRequestHeaders(req: Request): Record<string, string> {
 		const headers: Record<string, string> = {}
@@ -451,10 +507,10 @@ ${bodyMarkup}
 	@Spec("Forwards upstream response and injects test overlay into HTML payloads.")
 	private async forwardUpstreamResponse(res: Response, upstreamResponse: globalThis.Response, report: ProjectReport): Promise<void> {
 		const contentType = upstreamResponse.headers.get("content-type") ?? ""
-		const bodyBuffer = Buffer.from(await upstreamResponse.arrayBuffer())
 		const isHtml = contentType.toLowerCase().includes("text/html")
 
 		if (isHtml) {
+			const bodyBuffer = Buffer.from(await upstreamResponse.arrayBuffer())
 			const upstreamHtml = bodyBuffer.toString("utf8")
 			const htmlWithOverlay = this.injectOverlayIntoHtml(upstreamHtml, report)
 			this.copyUpstreamResponseHeaders(res, upstreamResponse, true)
@@ -467,7 +523,13 @@ ${bodyMarkup}
 		this.copyUpstreamResponseHeaders(res, upstreamResponse, false)
 		this.applyNoStoreResponseHeaders(res)
 		res.status(upstreamResponse.status)
-		res.send(bodyBuffer)
+		if (upstreamResponse.body === null) {
+			res.end()
+			return
+		}
+		const upstreamBody = Readable.fromWeb(upstreamResponse.body as unknown as NodeReadableStream)
+		upstreamBody.on("error", error => res.destroy(error))
+		upstreamBody.pipe(res)
 	}
 
 	@Spec("Forces the browser to revalidate every tunnel response during local development.")
@@ -544,123 +606,4 @@ ${bodyMarkup}
 </script>`
 			}
 
-	@Spec("Recursively scans for supported companion test files and extracts static @Scenario metadata.")
-	private findTestsWithScenarios(projectPath: string): TestDescriptor[] {
-		const relativeToAbsolute = new Map<string, string>()
-		const stack: string[] = [projectPath]
-
-		while (stack.length > 0) {
-			const currentPath = stack.pop()
-			if (!currentPath) {
-				continue
-			}
-			const entries = fs.readdirSync(currentPath, { withFileTypes: true })
-			for (const entry of entries) {
-				const fullPath = path.join(currentPath, entry.name)
-				if (entry.isDirectory()) {
-					stack.push(fullPath)
-					continue
-				}
-				if (!entry.isFile() || !FileVariantSupport.isTestFilePath(fullPath)) {
-					continue
-				}
-				const relativePath = this.toPosixPath(path.relative(projectPath, fullPath))
-				relativeToAbsolute.set(relativePath, fullPath)
-			}
-		}
-
-		const sortedPaths = Array.from(relativeToAbsolute.keys()).sort((a, b) => a.localeCompare(b))
-		const project = new Project({ skipAddingFilesFromTsConfig: true })
-		return sortedPaths.map(testPath => ({
-			path: testPath,
-			scenarios: this.findScenariosInTestFile(project, relativeToAbsolute.get(testPath) ?? "")
-		}))
-	}
-
-	@Spec("Builds a path-keyed map of scenario metadata for overlay config delivery.")
-	private mapScenariosByTest(tests: TestDescriptor[]): Record<string, ScenarioDescriptor[]> {
-		const map: Record<string, ScenarioDescriptor[]> = {}
-		for (const test of tests) {
-			map[test.path] = test.scenarios.map(scenario => ({
-				methodName: scenario.methodName,
-				title: scenario.title
-			}))
-		}
-		return map
-	}
-
-	@Spec("Parses one test source file and returns static methods decorated with @Scenario.")
-	private findScenariosInTestFile(project: Project, absoluteTestFilePath: string): ScenarioDescriptor[] {
-		if (absoluteTestFilePath.trim().length === 0) {
-			return []
-		}
-		try {
-			const sourceFile = project.addSourceFileAtPathIfExists(absoluteTestFilePath)
-			if (!sourceFile) {
-				return []
-			}
-			const classes = sourceFile.getClasses()
-			if (classes.length === 0) {
-				return []
-			}
-			const exportedClasses = classes.filter(classDecl => classDecl.isExported())
-			const preferredClass = exportedClasses.find(classDecl => {
-				const className = String(classDecl.getName() ?? "")
-				return className.endsWith("Test") || className.endsWith("Test2")
-			})
-			const testClass = preferredClass ?? exportedClasses[0] ?? classes[0]
-			if (!testClass) {
-				return []
-			}
-
-			const scenarios: ScenarioDescriptor[] = []
-			for (const method of testClass.getMethods()) {
-				if (!method.isStatic()) {
-					continue
-				}
-				if (!method.getDecorators().some(decorator => decorator.getName() === "Scenario")) {
-					continue
-				}
-				scenarios.push({
-					methodName: method.getName(),
-					title: this.getScenarioTitle(method)
-				})
-			}
-			return scenarios
-		} catch {
-			return []
-		}
-	}
-
-	@Spec("Reads display title from @Scenario decorator or falls back to method name.")
-	private getScenarioTitle(method: MethodDeclaration): string {
-		const decorator = method.getDecorators().find(candidate => candidate.getName() === "Scenario")
-		if (!decorator) {
-			return method.getName()
-		}
-		const title = this.normalizeDecoratorString(decorator.getArguments()[0]?.getText())
-		return title.length > 0 ? title : method.getName()
-	}
-
-	@Spec("Converts decorator argument text into an end-user string.")
-	private normalizeDecoratorString(rawText?: string): string {
-		if (!rawText) {
-			return ""
-		}
-		const trimmed = rawText.trim()
-		if (trimmed.length === 0) {
-			return ""
-		}
-		const first = trimmed[0]
-		const last = trimmed[trimmed.length - 1]
-		if ((first === "\"" || first === "'" || first === "`") && last === first) {
-			return trimmed.slice(1, -1)
-		}
-		return trimmed
-	}
-
-	@Spec("Normalizes path separators for stable plain-text output across platforms.")
-	private toPosixPath(inputPath: string): string {
-		return inputPath.split(path.sep).join("/")
-	}
 }

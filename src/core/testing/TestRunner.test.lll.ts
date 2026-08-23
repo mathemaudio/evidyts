@@ -3,6 +3,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { AssertFn, Scenario, ScenarioParameter, Spec, SubjectFactory } from '../../public/lll.lll.js'
 import type { DiagnosticObject } from '../DiagnosticObject'
+import { CompiledOutputLocator } from '../config/CompiledOutputLocator.lll.js'
 import { ProjectInitiator } from '../ProjectInitiator.lll.js'
 import './TestRunner.lll'
 import { TestRunner } from './TestRunner.lll.js'
@@ -24,10 +25,8 @@ export class TestRunnerTest {
 	static async resolvesCompiledPathWithoutExplicitRootDir(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter) {
 		const assert: AssertFn = scenario.assert
 		const tsconfigPath = path.resolve('test-fixtures/test-runner-multi-root/client/tsconfig.json')
-		const loader = new ProjectInitiator(tsconfigPath, 'from_folder')
-		const runner = new TestRunner(loader, tsconfigPath)
 		const sourcePath = path.resolve('test-fixtures/test-runner-multi-root/client/src/Widget.test.lll.ts')
-		const compiledPath = (runner as unknown as { getCompiledPath: (filePath: string) => string | null }).getCompiledPath(sourcePath)
+		const compiledPath = new CompiledOutputLocator(tsconfigPath).getCompiledPath(sourcePath)
 		const expectedPath = path.resolve('test-fixtures/test-runner-multi-root/client/dist/client/src/Widget.test.lll.js')
 		assert(compiledPath === expectedPath, `Expected compiled path '${expectedPath}', got '${compiledPath ?? 'null'}'`)
 	}
@@ -174,7 +173,7 @@ export class AppTest2 {
 		assert(diagnostic.message.includes('Browser tunnel unavailable'), 'Expected screenshot diagnostic to explain that the browser tunnel is unavailable')
 	}
 
-	@Scenario('times out a stuck unit scenario using the configured test timeout')
+	@Scenario('times out a stuck unit scenario using the configured per-scenario timeout')
 	static async timesOutStuckUnitScenario(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
 		const assert: AssertFn = scenario.assert
 		const runner = new TestRunner(new ProjectInitiator('./tsconfig.json', 'from_imports', 'src/examples/MathObject.lll.ts'), './tsconfig.json')
@@ -207,7 +206,8 @@ export class AppTest2 {
 		)
 
 		assert(diagnostic !== null, 'Expected a stuck unit scenario to produce a timeout diagnostic')
-		assert(diagnostic.message.includes('Test run timed out after 5ms'), 'Expected the diagnostic to report the configured test timeout')
+		assert(diagnostic.message.includes('timed out after 5ms'), 'Expected the diagnostic to report the configured per-scenario timeout')
+		assert(diagnostic.message.includes('--scenarioTimeoutMs'), 'Expected the diagnostic to point at the per-scenario knob')
 	}
 
 	@Scenario('passes subjectFactory into instantiable unit scenarios')
@@ -288,5 +288,77 @@ export class AppTest2 {
 
 		assert(diagnostic !== null, 'Expected waitFor timeout to produce a diagnostic')
 		assert(diagnostic.message.includes('Condition was not met within 15ms: custom timeout context'), 'Expected waitFor timeout message to include custom context')
+	}
+
+	@Scenario('sizes browser shards by test file and announces the scenario count they will cover')
+	static async plansBrowserShards(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lllts-test-runner-tunnel-'))
+
+		try {
+			const srcDir = path.join(tempRoot, 'src')
+			fs.mkdirSync(srcDir, { recursive: true })
+			fs.writeFileSync(
+				path.join(tempRoot, 'tsconfig.json'),
+				JSON.stringify({
+					compilerOptions: {
+						target: 'ES2022',
+						module: 'CommonJS',
+						moduleResolution: 'Node',
+						experimentalDecorators: true
+					},
+					include: ['src/**/*']
+				})
+			)
+			fs.writeFileSync(path.join(srcDir, 'Board.lll.ts'), 'export class Board { value = 1 }\n')
+			fs.writeFileSync(
+				path.join(srcDir, 'Board.test.lll.ts'),
+				`
+import "./Board.lll"
+import { Scenario, ScenarioParameter, SubjectFactory } from "../public/lll.lll"
+import { Board } from "./Board.lll"
+
+export class BoardTest {
+	testType = "behavioral"
+
+	@Scenario("draws")
+	static async drawsScenario(subjectFactory: SubjectFactory<Board>, scenario: ScenarioParameter) {}
+
+	@Scenario("clears")
+	static async clearsScenario(subjectFactory: SubjectFactory<Board>, scenario: ScenarioParameter) {}
+}
+`
+			)
+
+			const loader = new ProjectInitiator(path.join(tempRoot, 'tsconfig.json'), 'from_imports', 'src/Board.lll.ts')
+			const runner = new TestRunner(loader, path.join(tempRoot, 'tsconfig.json'))
+			const lines: string[] = []
+			const originalLog = console.log
+			console.log = (...args: unknown[]) => { lines.push(args.map(argument => String(argument)).join(' ')) }
+			let shardCount = 0
+			let requested = 0
+			try {
+				shardCount = runner.planBrowserShards(null, 0)
+				requested = runner.planBrowserShards(null, 4)
+			} finally {
+				console.log = originalLog
+			}
+
+			assert(
+				shardCount === 1,
+				`Expected one shard when the project holds a single test file, got ${String(shardCount)}`
+			)
+			assert(
+				lines.some(line => line === 'Scenario workers: 1 (serial, 2 browser scenarios)'),
+				`Expected an unrequested tunnel run to stay serial and still count its scenarios, got: ${lines.join(' | ')}`
+			)
+
+			assert(
+				requested === 1,
+				'Expected an explicit worker request to stay clamped to the number of shardable test files'
+			)
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true })
+		}
 	}
 }

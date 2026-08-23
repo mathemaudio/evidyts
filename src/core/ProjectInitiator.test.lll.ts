@@ -94,4 +94,92 @@ export class ProjectInitiatorTest {
 			fs.rmSync(tempRoot, { recursive: true, force: true })
 		}
 	}
+
+	@Scenario("Follow a paths alias outside the package root and load its companion")
+	static async followExternalPathsAlias(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lllts-external-alias-"))
+
+		try {
+			const serverDir = path.join(workspaceRoot, "server")
+			const serverSrcDir = path.join(serverDir, "src")
+			const sharedSrcDir = path.join(workspaceRoot, "shared", "src")
+			fs.mkdirSync(serverSrcDir, { recursive: true })
+			fs.mkdirSync(sharedSrcDir, { recursive: true })
+			fs.writeFileSync(
+				path.join(serverDir, "tsconfig.json"),
+				JSON.stringify({
+					compilerOptions: {
+						target: "ES2022",
+						module: "CommonJS",
+						moduleResolution: "Node",
+						baseUrl: ".",
+						paths: { "@shared/*": ["../shared/src/*"] }
+					},
+					include: ["src/**/*", "../shared/src/**/*"]
+				})
+			)
+			fs.writeFileSync(
+				path.join(serverSrcDir, "Main.lll.ts"),
+				'import { SharedThing } from "@shared/SharedThing.lll.js"\nexport class Main { value = SharedThing.value }\n'
+			)
+			fs.writeFileSync(path.join(sharedSrcDir, "SharedThing.lll.ts"), "export class SharedThing { static value = 1 }\n")
+			fs.writeFileSync(path.join(sharedSrcDir, "SharedThing.test.lll.ts"), "export class SharedThingTest {}\n")
+
+			const loader = new ProjectInitiator(path.join(serverDir, "tsconfig.json"), "from_imports", "src/Main.lll.ts")
+			const loadedPaths = loader.getFiles().map(file => path.resolve(file.getFilePath()))
+
+			assert(loadedPaths.includes(path.join(sharedSrcDir, "SharedThing.lll.ts")), "Expected aliased shared host to be loaded")
+			assert(loadedPaths.includes(path.join(sharedSrcDir, "SharedThing.test.lll.ts")), "Expected aliased shared companion to be loaded")
+		} finally {
+			fs.rmSync(workspaceRoot, { recursive: true, force: true })
+		}
+	}
+
+	@Scenario("Seed an external target companion owned by the effective tsconfig")
+	static async seedExternalTargetCompanion(subjectFactory: SubjectFactory<unknown>, scenario: ScenarioParameter): Promise<void> {
+		const assert: AssertFn = scenario.assert
+		const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lllts-external-target-"))
+
+		try {
+			const serverDir = path.join(workspaceRoot, "server")
+			const serverSrcDir = path.join(serverDir, "src")
+			const sharedSrcDir = path.join(workspaceRoot, "shared", "src")
+			const unownedSrcDir = path.join(workspaceRoot, "unowned", "src")
+			fs.mkdirSync(serverSrcDir, { recursive: true })
+			fs.mkdirSync(sharedSrcDir, { recursive: true })
+			fs.mkdirSync(unownedSrcDir, { recursive: true })
+			fs.writeFileSync(
+				path.join(serverDir, "tsconfig.json"),
+				JSON.stringify({
+					compilerOptions: {
+						target: "ES2022",
+						module: "CommonJS",
+						moduleResolution: "Node",
+						rootDir: "..",
+						outDir: "dist"
+					},
+					include: ["src/**/*", "../shared/src/**/*"]
+				})
+			)
+			fs.writeFileSync(path.join(serverSrcDir, "Main.lll.ts"), "export class Main {}\n")
+			fs.writeFileSync(path.join(sharedSrcDir, "SharedThing.lll.ts"), "export class SharedThing {}\n")
+			fs.writeFileSync(path.join(sharedSrcDir, "SharedThing.test.lll.ts"), "export class SharedThingTest {}\n")
+			fs.writeFileSync(path.join(unownedSrcDir, "Unowned.lll.ts"), "export class Unowned {}\n")
+			fs.writeFileSync(path.join(unownedSrcDir, "Unowned.test.lll.ts"), "export class UnownedTest {}\n")
+
+			const loader = new ProjectInitiator(path.join(serverDir, "tsconfig.json"), "from_imports", "src/Main.lll.ts")
+			const added = loader.addTargetTestFile("../shared/src/SharedThing.test.lll.ts")
+			const unownedAdded = loader.addTargetTestFile("../unowned/src/Unowned.test.lll.ts")
+			const loadedPaths = loader.getFiles().map(file => path.resolve(file.getFilePath()))
+
+			assert(added, "Expected the selected companion to be accepted as part of the effective tsconfig")
+			assert(!unownedAdded, "Expected a companion outside the effective tsconfig and loaded graph to be rejected")
+			assert(loadedPaths.includes(path.join(sharedSrcDir, "SharedThing.lll.ts")), "Expected target seeding to load the paired shared host")
+			assert(loadedPaths.includes(path.join(sharedSrcDir, "SharedThing.test.lll.ts")), "Expected target seeding to load the shared companion")
+			assert(!loadedPaths.includes(path.join(unownedSrcDir, "Unowned.test.lll.ts")), "Expected a rejected target to stay outside the loaded graph")
+		} finally {
+			fs.rmSync(workspaceRoot, { recursive: true, force: true })
+		}
+	}
 }

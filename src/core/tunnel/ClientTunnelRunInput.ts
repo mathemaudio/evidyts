@@ -3,6 +3,8 @@ export type ClientTunnelRunInput = {
 	headed: boolean
 	timeoutMs: number
 	testTimeoutMs?: number
+	scenarioTimeoutMs?: number
 	testPath?: string | null
+	shardCount?: number
 	projectRoot: string
 }

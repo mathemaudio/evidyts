@@ -2,12 +2,14 @@ type OverlayScenarioReport = {
 	title: string
 	state: string
 	details: string
+	durationMs?: number
 }
 
 type OverlayTestReport = {
 	testPath: string
 	status: string
 	failureDetails?: string
+	durationMs?: number
 	scenarioResults: OverlayScenarioReport[]
 }
 
@@ -91,6 +93,7 @@ export class OverlayReportRuntime {
 		const reports = Array.isArray(testReports) ? testReports : []
 		let passedScenarios = 0
 		let failedScenarios = 0
+		let scenarioDurationMs = 0
 		for (const report of reports) {
 			const scenarioResults = Array.isArray(report?.scenarioResults) ? report.scenarioResults : []
 			for (const scenarioResult of scenarioResults) {
@@ -100,6 +103,10 @@ export class OverlayReportRuntime {
 				} else if (scenarioState === "failed") {
 					failedScenarios++
 				}
+				const duration = scenarioResult?.durationMs
+				if (typeof duration === "number" && Number.isFinite(duration) && duration > 0) {
+					scenarioDurationMs += duration
+				}
 			}
 		}
 		return {
@@ -107,7 +114,8 @@ export class OverlayReportRuntime {
 			summary: {
 				totalTests: reports.length,
 				passedScenarios,
-				failedScenarios
+				failedScenarios,
+				scenarioDurationMs
 			},
 			tests: reports
 		}

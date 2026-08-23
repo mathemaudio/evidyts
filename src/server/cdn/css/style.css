@@ -142,23 +142,124 @@
 	margin: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 6px
+	gap: 2px
 }
 
 #lllts-test-list button {
 	width: 100%;
 	text-align: left;
-	border: 1px solid rgb(157, 157, 157);
-	border-radius: 8px;
-	background: rgb(78, 78, 78);
+	border: 1px solid transparent;
+	border-radius: 6px;
+	background: transparent;
 	color: rgb(255, 255, 255);
-	padding: 8px 10px;
+	padding: 6px 8px;
 	font: 500 12px/1.3 ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-	cursor: pointer
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0
 }
 
 #lllts-test-list button:hover {
+	border-color: rgb(116, 116, 116);
 	background: rgb(69, 69, 69)
+}
+
+#lllts-test-list button:focus-visible {
+	outline: 2px solid rgb(137, 194, 255);
+	outline-offset: -2px
+}
+
+#lllts-test-list button:disabled {
+	opacity: .55;
+	cursor: default
+}
+
+.lllts-test-tree-folder,
+.lllts-test-tree-file,
+.lllts-test-tree-children {
+	list-style: none;
+	padding: 0;
+	margin: 0
+}
+
+.lllts-test-tree-children {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding-left: 18px
+}
+
+.lllts-test-tree-children[hidden] {
+	display: none
+}
+
+.lllts-test-tree-folder-button::before {
+	content: "▸";
+	flex: 0 0 8px;
+	color: rgb(205, 205, 205)
+}
+
+.lllts-test-tree-folder-button[aria-expanded="true"]::before {
+	content: "▾"
+}
+
+.lllts-test-tree-folder-icon {
+	position: relative;
+	box-sizing: border-box;
+	width: 15px;
+	height: 10px;
+	margin-top: 2px;
+	border-radius: 2px;
+	background: rgb(221, 176, 76);
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
+	flex: 0 0 auto
+}
+
+.lllts-test-tree-folder-icon::before {
+	content: "";
+	position: absolute;
+	left: 1px;
+	top: -3px;
+	width: 7px;
+	height: 4px;
+	border-radius: 2px 2px 0 0;
+	background: rgb(221, 176, 76)
+}
+
+#lllts-test-list .lllts-test-tree-file-button {
+	padding-left: 23px
+}
+
+.lllts-test-tree-file-icon {
+	position: relative;
+	box-sizing: border-box;
+	width: 12px;
+	height: 15px;
+	border: 1px solid rgb(190, 201, 212);
+	border-radius: 1px;
+	background: rgb(92, 101, 110);
+	flex: 0 0 auto
+}
+
+.lllts-test-tree-file-icon::after {
+	content: "";
+	position: absolute;
+	right: -1px;
+	top: -1px;
+	width: 4px;
+	height: 4px;
+	border-left: 1px solid rgb(190, 201, 212);
+	border-bottom: 1px solid rgb(190, 201, 212);
+	background: rgb(78, 78, 78)
+}
+
+.lllts-test-tree-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap
 }
 
 #lllts-test-empty {

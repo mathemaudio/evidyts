@@ -35,6 +35,11 @@ export type RuleCode =
 	// Folder breadth
 	| "folder-too-many-files"
 	| "folder-too-many-folders"
+	// Line width
+	| "line-too-wide"              // Single line exceeds the absolute width ceiling
+	| "line-width-distribution"    // File misses a configured share of lines within a width band
+	// Statement density
+	| "multiple-statements-per-line" // Line opens more statements than the configured maximum
 	// Control-flow restrictions
 	| "assignment-in-conditions"    // Assignment expressions are forbidden inside supported condition positions
 	| "no-loose-equality"           // Loose equality operators are forbidden

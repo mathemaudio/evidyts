@@ -4,8 +4,10 @@ import * as path from "path"
 import type { Browser, BrowserContext, BrowserType, ConsoleMessage, Page } from "playwright"
 import * as util from "util"
 import { Spec } from "../../public/lll.lll"
+import { ClientTunnelReportMerger } from "./ClientTunnelReportMerger.lll"
 import type { ClientTunnelRunInput } from "./ClientTunnelRunInput"
 import type { ClientTunnelRunResult } from "./ClientTunnelRunResult"
+import type { ClientTunnelTimings } from "./ClientTunnelTimings"
 
 @Spec("Runs behavioral scenarios through the overlay UI using a Playwright browser tunnel.")
 export class ClientTunnelRunner {
@@ -20,41 +22,66 @@ export class ClientTunnelRunner {
 		Spec("Initializes client tunnel runner with injectable playwright loader.")
 	}
 
-	@Spec("Launches browser, waits for the fixed report variable, and returns parsed behavioral status.")
+	@Spec("Launches one browser, runs every shard in its own isolated context, and merges their reports.")
 	public async run(input: ClientTunnelRunInput): Promise<ClientTunnelRunResult> {
-		const testTimeoutMs = this.resolveTestTimeoutMs(input.testTimeoutMs)
+		const runStartedAt = Date.now()
+		const playwright = this.loadPlaywright()
+		if (!playwright.chromium || typeof playwright.chromium.launch !== "function") {
+			return {
+				status: "runtime_error",
+				message: "Playwright chromium launcher is unavailable. Install 'playwright' and retry."
+			}
+		}
+
+		const browserInstance = await this.launchChromiumWithRecovery(playwright.chromium, input.headed)
+		if ("status" in browserInstance) {
+			return browserInstance
+		}
+		const launchedAt = Date.now()
+		const shardCount = Math.max(1, input.shardCount ?? 1)
+		try {
+			const shardResults = await Promise.all(
+				Array.from({ length: shardCount }, (_unused, shardIndex) =>
+					this.runShard(browserInstance, input, shardIndex, shardCount, runStartedAt, launchedAt))
+			)
+			return ClientTunnelReportMerger.merge(shardResults, Date.now() - runStartedAt)
+		} finally {
+			await this.safeClose(browserInstance)
+		}
+	}
+
+	@Spec("Runs one shard of the suite in a private browser context so shards cannot share storage or globals.")
+	private async runShard(
+		browser: Browser,
+		input: ClientTunnelRunInput,
+		shardIndex: number,
+		shardCount: number,
+		runStartedAt: number,
+		launchedAt: number
+	): Promise<ClientTunnelRunResult> {
+		const testTimeoutMs = this.resolveTimeoutMs(input.testTimeoutMs, 600000)
+		const scenarioTimeoutMs = this.resolveTimeoutMs(input.scenarioTimeoutMs, 15000)
 		const consoleErrors: NonNullable<ClientTunnelRunResult["consoleErrors"]> = []
 		let currentPhase: NonNullable<ClientTunnelRunResult["consoleErrors"]>[number]["phase"] = "preflight"
-		let browser: Browser | null = null
 		let context: BrowserContext | null = null
 		let page: Page | null = null
 		let timeoutPhase: NonNullable<NonNullable<ClientTunnelRunResult["timeoutContext"]>["phase"]> = "navigation"
 		let lastProgressContext: ClientTunnelRunResult["timeoutContext"] = undefined
+		const phaseMarks: number[] = [launchedAt]
 		try {
-			const playwright = this.loadPlaywright()
-			if (!playwright.chromium || typeof playwright.chromium.launch !== "function") {
-				return {
-					status: "runtime_error",
-					message: "Playwright chromium launcher is unavailable. Install 'playwright' and retry."
-				}
-			}
-
-			const browserInstance = await this.launchChromiumWithRecovery(playwright.chromium, input.headed)
-			if ("status" in browserInstance) {
-				return browserInstance
-			}
-			browser = browserInstance
-			const contextInstance = await browserInstance.newContext()
+			const contextInstance = await browser.newContext()
 			context = contextInstance
 			page = await contextInstance.newPage()
 			await this.exposeProgressBinding(page, progressContext => {
 				lastProgressContext = progressContext
 			})
 			await this.exposeScreenshotBinding(page, input.projectRoot)
-			const automaticUrl = this.buildAutomaticTunnelUrl(input.url, testTimeoutMs, input.testPath)
+			const automaticUrl = this.buildAutomaticTunnelUrl(input.url, scenarioTimeoutMs, input.testPath, shardIndex, shardCount)
 			this.attachConsoleErrorListeners(page, consoleErrors, () => currentPhase)
+			phaseMarks.push(Date.now())
 
 			await page.goto(automaticUrl, { waitUntil: "domcontentloaded", timeout: input.timeoutMs })
+			phaseMarks.push(Date.now())
 			await this.waitForConsoleStabilization()
 			const preflightConsoleErrors = this.filterConsoleErrorsByPhase(consoleErrors, "preflight")
 			if (preflightConsoleErrors.length > 0) {
@@ -78,6 +105,8 @@ export class ClientTunnelRunner {
 				() => (globalThis as typeof globalThis & { FIXED_llltsLastRunReportJson?: unknown }).FIXED_llltsLastRunReportJson
 			)
 			const reportText = typeof reportTextRaw === "string" ? reportTextRaw : String(reportTextRaw ?? "")
+			phaseMarks.push(Date.now())
+			const timings = this.buildTimings(runStartedAt, phaseMarks)
 			await this.waitForConsoleStabilization()
 			const scenarioConsoleErrors = this.filterConsoleErrorsByPhase(consoleErrors, "scenario")
 			if (scenarioConsoleErrors.length > 0) {
@@ -85,6 +114,7 @@ export class ClientTunnelRunner {
 					status: "console_error",
 					reportText,
 					reportJson,
+					timings,
 					consoleErrors: scenarioConsoleErrors
 				}
 			}
@@ -92,7 +122,8 @@ export class ClientTunnelRunner {
 			return {
 				status: this.reportIndicatesFailure(reportText) ? "failed" : "passed",
 				reportText,
-				reportJson
+				reportJson,
+				timings
 			}
 		} catch (error) {
 			const timeoutContext = this.isTimeoutError(error)
@@ -101,7 +132,21 @@ export class ClientTunnelRunner {
 			return this.mapRuntimeError(error, timeoutContext)
 		} finally {
 			await this.safeClose(context)
-			await this.safeClose(browser)
+		}
+	}
+
+	@Spec("Converts recorded phase marks into wall-clock durations for each stage of one tunnel run.")
+	private buildTimings(runStartedAt: number, phaseMarks: number[]): ClientTunnelTimings | undefined {
+		const [launchedAt, readyAt, navigatedAt, reportedAt] = phaseMarks
+		if (reportedAt === undefined || launchedAt === undefined || readyAt === undefined || navigatedAt === undefined) {
+			return undefined
+		}
+		return {
+			browserLaunchMs: launchedAt - runStartedAt,
+			pageSetupMs: readyAt - launchedAt,
+			navigationMs: navigatedAt - readyAt,
+			scenarioRunMs: reportedAt - navigatedAt,
+			totalMs: reportedAt - runStartedAt
 		}
 	}
 
@@ -381,14 +426,25 @@ export class ClientTunnelRunner {
 	}
 
 	@Spec("Appends the browser auto-run query flag while preserving the rest of the tunnel URL.")
-	private buildAutomaticTunnelUrl(url: string, stepTimeoutMs: number, testPath?: string | null): string {
+	private buildAutomaticTunnelUrl(
+		url: string,
+		stepTimeoutMs: number,
+		testPath?: string | null,
+		shardIndex = 0,
+		shardCount = 1
+	): string {
 		const automatic_url_key = "automatic"
 		const step_timeout_url_key = "stepTimeoutMs"
 		const test_path_url_key = "testPath"
+		const shardQuery = shardCount > 1 ? `&shardIndex=${String(shardIndex)}&shardCount=${String(shardCount)}` : ""
 		try {
 			const parsedUrl = new URL(url)
 			parsedUrl.searchParams.set(automatic_url_key, "true")
 			parsedUrl.searchParams.set(step_timeout_url_key, String(stepTimeoutMs))
+			if (shardCount > 1) {
+				parsedUrl.searchParams.set("shardIndex", String(shardIndex))
+				parsedUrl.searchParams.set("shardCount", String(shardCount))
+			}
 			if (typeof testPath === "string" && testPath.length > 0) {
 				parsedUrl.searchParams.set(test_path_url_key, testPath)
 			}
@@ -398,16 +454,16 @@ export class ClientTunnelRunner {
 			const testPathQuery = typeof testPath === "string" && testPath.length > 0
 				? `&${test_path_url_key}=${encodeURIComponent(testPath)}`
 				: ""
-			return `${url}${separator}${automatic_url_key}=true&${step_timeout_url_key}=${stepTimeoutMs}${testPathQuery}`
+			return `${url}${separator}${automatic_url_key}=true&${step_timeout_url_key}=${stepTimeoutMs}${shardQuery}${testPathQuery}`
 		}
 	}
 
-	@Spec("Resolves the timeout applied to each browser-side test setup and scenario.")
-	private resolveTestTimeoutMs(testTimeoutMs?: number): number {
-		if (typeof testTimeoutMs !== "number" || !Number.isFinite(testTimeoutMs) || testTimeoutMs <= 0) {
-			return 30000
+	@Spec("Resolves one requested timeout value, falling back to the supplied default when it is unusable.")
+	private resolveTimeoutMs(requestedTimeoutMs: number | undefined, defaultTimeoutMs: number): number {
+		if (typeof requestedTimeoutMs !== "number" || !Number.isFinite(requestedTimeoutMs) || requestedTimeoutMs <= 0) {
+			return defaultTimeoutMs
 		}
-		return testTimeoutMs
+		return requestedTimeoutMs
 	}
 
 	@Spec("Maps browser/runtime errors into deterministic tunnel statuses.")

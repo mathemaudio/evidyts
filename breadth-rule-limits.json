@@ -1,6 +1,28 @@
 {
-	"maxFileLines": 700,
+	"maxFileLines": 2200,
 	"maxMethodBodyLines": 120,
 	"maxFilesPerFolder": 12,
-	"maxSubfoldersPerFolder": 8
+	"maxSubfoldersPerFolder": 8,
+	"lineWidth": {
+		"tabWidth": 4,
+		"measure": "collapseStringLiterals",
+		"hardMax": 200,
+		"minSampleLines": 20,
+		"severity": "warning",
+		"bands": [
+			{
+				"maxWidth": 60,
+				"minShare": 0.6
+			},
+			{
+				"maxWidth": 120,
+				"minShare": 0.9
+			}
+		]
+	},
+	"statementsPerLine": {
+		"max": 1,
+		"allowSingleStatementBody": true,
+		"severity": "warning"
+	}
 }

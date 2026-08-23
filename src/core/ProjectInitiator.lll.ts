@@ -1,6 +1,7 @@
 
 import * as fs from "fs"
 import * as path from "path"
+import * as ts from "typescript"
 import { Project, SourceFile } from "ts-morph"
 import { LoadStrategy } from "../LoadStrategy"
 import { Spec } from "../public/lll.lll.js"
@@ -15,12 +16,14 @@ export class ProjectInitiator {
 	private projectRootDir: string
 	private entryFilePath: string | null = null
 	private entrySourceRootDir: string | null = null
+	private parsedConfig: ts.ParsedCommandLine
 
 	constructor(private tsconfigPath: string, strategy: LoadStrategy = "from_imports", private entryFile?: string) {
 		Spec("Initializes project graph loading based on the provided strategy.")
 		this.tsconfigPath = path.resolve(tsconfigPath)
 		this.projectRootDir = path.dirname(this.tsconfigPath)
 		this.config = this.loadTsConfig(this.tsconfigPath)
+		this.parsedConfig = this.parseTsConfig(this.tsconfigPath)
 		this.entryFilePath = entryFile !== undefined ? this.resolveEntryFilePath(entryFile) : null
 		this.entrySourceRootDir = entryFile !== undefined ? this.resolveEntrySourceRootDir(entryFile, this.entryFilePath) : null
 
@@ -45,6 +48,15 @@ export class ProjectInitiator {
 	private loadTsConfig(configPath: string): tsconfig_type {
 		const configContent = fs.readFileSync(configPath, "utf-8")
 		return JSON.parse(configContent)
+	}
+
+	@Spec("Parses the effective TypeScript configuration for module resolution and project membership checks.")
+	private parseTsConfig(configPath: string): ts.ParsedCommandLine {
+		const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
+		if (configFile.error !== undefined) {
+			throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n"))
+		}
+		return ts.parseJsonConfigFileContent(configFile.config, ts.sys, this.projectRootDir, undefined, configPath)
 	}
 
 	@Spec("Adds source files to the project using include/exclude patterns from tsconfig.")
@@ -95,8 +107,7 @@ export class ProjectInitiator {
 		// Add the file to the project
 		let sourceFile: SourceFile
 		try {
-			sourceFile = this.project.addSourceFileAtPath(normalizedPath)
-			const relative = path.relative(path.dirname(this.tsconfigPath), normalizedPath)
+			sourceFile = this.project.getSourceFile(normalizedPath) ?? this.project.addSourceFileAtPath(normalizedPath)
 		} catch (error) {
 			// File might not exist or not be accessible, skip it
 			return
@@ -111,14 +122,7 @@ export class ProjectInitiator {
 
 		for (const importDecl of importDeclarations) {
 			const moduleSpecifier = importDecl.getModuleSpecifierValue()
-
-			// Skip node_modules imports
-			if (!moduleSpecifier.startsWith(".") && !moduleSpecifier.startsWith("/")) {
-				continue
-			}
-
-			// Resolve the import path
-			const resolvedPath = this.resolveImportPath(sourceDir, moduleSpecifier)
+			const resolvedPath = this.resolveImportPath(normalizedPath, sourceDir, moduleSpecifier)
 
 			if (resolvedPath !== null) {
 				this.followImportsRecursively(resolvedPath, visited)
@@ -131,12 +135,7 @@ export class ProjectInitiator {
 				continue
 			}
 
-			// Skip node_modules exports
-			if (!moduleSpecifier.startsWith(".") && !moduleSpecifier.startsWith("/")) {
-				continue
-			}
-
-			const resolvedPath = this.resolveImportPath(sourceDir, moduleSpecifier)
+			const resolvedPath = this.resolveImportPath(normalizedPath, sourceDir, moduleSpecifier)
 			if (resolvedPath !== null) {
 				this.followImportsRecursively(resolvedPath, visited)
 			}
@@ -166,10 +165,23 @@ export class ProjectInitiator {
 		}
 	}
 
-	@Spec("Resolves a relative import to an absolute file path, handling .ts/.lll.ts extensions.")
-	private resolveImportPath(sourceDir: string, moduleSpecifier: string): string | null {
+	@Spec("Resolves project imports with TypeScript semantics, including paths aliases, with a fallback for LLL extensions.")
+	private resolveImportPath(containingFile: string, sourceDir: string, moduleSpecifier: string): string | null {
+		const resolvedModule = ts.resolveModuleName(
+			moduleSpecifier,
+			containingFile,
+			this.parsedConfig.options,
+			ts.sys
+		).resolvedModule
+		if (resolvedModule !== undefined && !resolvedModule.isExternalLibraryImport) {
+			return path.resolve(resolvedModule.resolvedFileName)
+		}
+		if (!moduleSpecifier.startsWith(".") && !moduleSpecifier.startsWith("/")) {
+			return null
+		}
+
 		const possibleExtensions = [".ts", ".lll.ts", ".old.ts", ".d.ts", ".d.old.ts"]
-		let basePath = path.resolve(sourceDir, moduleSpecifier)
+		const basePath = path.resolve(sourceDir, moduleSpecifier)
 
 		// If the module specifier already has an extension, try it directly first
 		if (path.extname(moduleSpecifier).length > 0) {
@@ -202,6 +214,40 @@ export class ProjectInitiator {
 		}
 
 		return null
+	}
+
+	@Spec("Adds an explicitly selected companion when it or its host belongs to the effective TypeScript project.")
+	public addTargetTestFile(requestedTestPath: string): boolean {
+		const absoluteTestPath = path.isAbsolute(requestedTestPath)
+			? path.resolve(requestedTestPath)
+			: path.resolve(this.projectRootDir, requestedTestPath)
+		const variant = FileVariantSupport.getVariantForFile(absoluteTestPath)
+		if (!variant?.isTest || !fs.existsSync(absoluteTestPath)) {
+			return false
+		}
+
+		const hostPath = FileVariantSupport.getPrimaryFilePath(absoluteTestPath)
+		const belongsToConfiguredProject = this.isConfiguredProjectFile(absoluteTestPath)
+			|| (hostPath !== null && this.isConfiguredProjectFile(hostPath))
+		const belongsToLoadedGraph = hostPath !== null && this.project.getSourceFile(hostPath) !== undefined
+		if (!belongsToConfiguredProject && !belongsToLoadedGraph) {
+			return false
+		}
+
+		this.followImportsRecursively(absoluteTestPath, new Set<string>())
+		return this.project.getSourceFile(absoluteTestPath) !== undefined
+	}
+
+	@Spec("Checks whether a source path is one of the effective tsconfig root files.")
+	private isConfiguredProjectFile(filePath: string): boolean {
+		const expectedPath = this.canonicalPath(filePath)
+		return this.parsedConfig.fileNames.some(configuredPath => this.canonicalPath(configuredPath) === expectedPath)
+	}
+
+	@Spec("Normalizes source paths using the host file-system case rules.")
+	private canonicalPath(filePath: string): string {
+		const normalizedPath = path.resolve(filePath)
+		return ts.sys.useCaseSensitiveFileNames ? normalizedPath : normalizedPath.toLowerCase()
 	}
 
 	@Spec("Returns all source files matching the include/exclude patterns from tsconfig.")

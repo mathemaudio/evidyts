@@ -7,7 +7,20 @@
 
   // src/server/overlay-runtime/OverlayModuleRuntime.lll.ts
   var _OverlayModuleRuntime = class _OverlayModuleRuntime {
+    static isDebugEnabled() {
+      return _OverlayModuleRuntime.debugEnabled;
+    }
+    static readDebugFlag() {
+      if (typeof window === "undefined" || typeof window.location !== "object") {
+        return false;
+      }
+      const debugValue = new URLSearchParams(window.location.search).get("debug");
+      return debugValue === "1" || debugValue === "true";
+    }
     static debug(message, details) {
+      if (!_OverlayModuleRuntime.debugEnabled) {
+        return;
+      }
       if (details === void 0) {
         console.log(`${this.debugPrefix} ${message}`);
         return;
@@ -22,6 +35,9 @@
       console.error(`${this.debugPrefix} ${message}`, error, details);
     }
     static identityProbe(message, details) {
+      if (!_OverlayModuleRuntime.debugEnabled) {
+        return;
+      }
       console.log(`${this.identityProbePrefix} ${message} ${JSON.stringify(details)}`);
     }
     static describeValue(value) {
@@ -216,13 +232,15 @@
     static async mountBehavioralSubject(popupRenderHost, HostClass) {
       const effectiveHostClass = this.resolveEffectiveConstructor(HostClass);
       const registeredTag = this.findRegisteredTagForConstructor(HostClass) ?? this.findRegisteredTagForConstructor(effectiveHostClass);
-      this.debug("mountBehavioralSubject:start", {
-        hostClass: this.describeClass(HostClass),
-        effectiveHostClass: this.describeClass(effectiveHostClass),
-        registeredTag,
-        renderHostChildCount: popupRenderHost.childElementCount,
-        nativeHTMLElement: this.describeClass(this.nativeHTMLElementConstructor)
-      });
+      if (this.debugEnabled) {
+        this.debug("mountBehavioralSubject:start", {
+          hostClass: this.describeClass(HostClass),
+          effectiveHostClass: this.describeClass(effectiveHostClass),
+          registeredTag,
+          renderHostChildCount: popupRenderHost.childElementCount,
+          nativeHTMLElement: this.describeClass(this.nativeHTMLElementConstructor)
+        });
+      }
       this.clearRenderHost(popupRenderHost);
       let subject;
       try {
@@ -231,22 +249,24 @@
         } else {
           subject = new effectiveHostClass();
         }
-        this.identityProbe("mountBehavioralSubject:constructed", {
-          hostClassName: typeof HostClass === "function" ? HostClass.name : "",
-          hostClassId: this.getFunctionIdentityId(HostClass),
-          effectiveHostClassName: typeof effectiveHostClass === "function" ? effectiveHostClass.name : "",
-          effectiveHostClassId: this.getFunctionIdentityId(effectiveHostClass),
-          subjectType: typeof subject,
-          subjectConstructorName: this.getConstructorName(subject),
-          subjectConstructorId: this.getFunctionIdentityId(this.getConstructorValue(subject)),
-          subjectInstanceofHostClass: typeof HostClass === "function" && subject instanceof HostClass,
-          subjectInstanceofEffectiveHostClass: typeof effectiveHostClass === "function" && subject instanceof effectiveHostClass,
-          registeredTag
-        });
-        this.debug("mountBehavioralSubject:constructed", {
-          subject: this.describeValue(subject),
-          subjectPrototypeChain: this.describePrototypeChain(Object.getPrototypeOf(subject))
-        });
+        if (this.debugEnabled) {
+          this.identityProbe("mountBehavioralSubject:constructed", {
+            hostClassName: typeof HostClass === "function" ? HostClass.name : "",
+            hostClassId: this.getFunctionIdentityId(HostClass),
+            effectiveHostClassName: typeof effectiveHostClass === "function" ? effectiveHostClass.name : "",
+            effectiveHostClassId: this.getFunctionIdentityId(effectiveHostClass),
+            subjectType: typeof subject,
+            subjectConstructorName: this.getConstructorName(subject),
+            subjectConstructorId: this.getFunctionIdentityId(this.getConstructorValue(subject)),
+            subjectInstanceofHostClass: typeof HostClass === "function" && subject instanceof HostClass,
+            subjectInstanceofEffectiveHostClass: typeof effectiveHostClass === "function" && subject instanceof effectiveHostClass,
+            registeredTag
+          });
+          this.debug("mountBehavioralSubject:constructed", {
+            subject: this.describeValue(subject),
+            subjectPrototypeChain: this.describePrototypeChain(Object.getPrototypeOf(subject))
+          });
+        }
       } catch (error) {
         this.debugError("mountBehavioralSubject:constructor failed", error, {
           hostClass: this.describeClass(HostClass),
@@ -352,6 +372,9 @@
       return nextId;
     }
   };
+  // Overlay tracing costs a CDP round trip per line and runs on the scenario hot path, so it is
+  // opt-in through ?debug=1 rather than always on.
+  __publicField(_OverlayModuleRuntime, "debugEnabled", _OverlayModuleRuntime.readDebugFlag());
   __publicField(_OverlayModuleRuntime, "nativeHTMLElementConstructor", typeof HTMLElement === "function" ? HTMLElement : null);
   __publicField(_OverlayModuleRuntime, "cacheBusterQueryParam", "__lllts_cb");
   __publicField(_OverlayModuleRuntime, "debugPrefix", "[EvidyTS overlay]");
@@ -429,6 +452,7 @@
       const reports = Array.isArray(testReports) ? testReports : [];
       let passedScenarios = 0;
       let failedScenarios = 0;
+      let scenarioDurationMs = 0;
       for (const report of reports) {
         const scenarioResults = Array.isArray(report?.scenarioResults) ? report.scenarioResults : [];
         for (const scenarioResult of scenarioResults) {
@@ -438,6 +462,10 @@
           } else if (scenarioState === "failed") {
             failedScenarios++;
           }
+          const duration = scenarioResult?.durationMs;
+          if (typeof duration === "number" && Number.isFinite(duration) && duration > 0) {
+            scenarioDurationMs += duration;
+          }
         }
       }
       return {
@@ -445,7 +473,8 @@
         summary: {
           totalTests: reports.length,
           passedScenarios,
-          failedScenarios
+          failedScenarios,
+          scenarioDurationMs
         },
         tests: reports
       };
@@ -657,7 +686,7 @@
     static createScenarioWaitFor() {
       return async (predicate, message, timeoutMs, intervalMs) => {
         const effectiveTimeoutMs = typeof timeoutMs === "number" ? timeoutMs : 1200;
-        const effectiveIntervalMs = typeof intervalMs === "number" ? intervalMs : 20;
+        const effectiveIntervalMs = typeof intervalMs === "number" ? intervalMs : 5;
         const startTime = Date.now();
         while (Date.now() - startTime < effectiveTimeoutMs) {
           if (await predicate()) {
@@ -715,7 +744,8 @@
       __publicField(this, "terminalPopupClose", null);
       const configuredTests = Array.isArray(config.tests) ? config.tests.map((testPath) => String(testPath ?? "")) : [];
       const selectedTestPath = this.getConfiguredTestPath();
-      this.tests = selectedTestPath === null ? configuredTests : configuredTests.filter((testPath) => testPath === selectedTestPath);
+      const chosenTests = selectedTestPath === null ? configuredTests : configuredTests.filter((testPath) => testPath === selectedTestPath);
+      this.tests = this.applyShardFilter(chosenTests);
       this.openByDefault = !!config.openByDefault;
     }
     getVersionLabel() {
@@ -773,26 +803,110 @@
       if (this.list) {
         this.list.textContent = "";
       }
-      for (const testPath of this.tests) {
-        const item = document.createElement("li");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = testPath;
-        button.setAttribute("data-test-path", testPath);
-        button.addEventListener("click", async () => {
-          if (this.isRunningAllTests) {
-            return;
-          }
-          await this.loadTestPreview(testPath, false);
-        });
-        item.appendChild(button);
-        this.list?.appendChild(item);
-      }
+      this.renderTestTree();
       if (this.shouldAutoRunFromQuery()) {
         setTimeout(() => {
           void this.runPanelPlayAllSequence(true);
         }, 0);
       }
+    }
+    renderTestTree() {
+      if (!this.list) {
+        return;
+      }
+      const root = this.buildTestTree();
+      this.renderTestTreeFolder(this.list, root);
+    }
+    buildTestTree() {
+      const root = {
+        name: "",
+        path: "",
+        folders: /* @__PURE__ */ new Map(),
+        files: []
+      };
+      for (const testPath of this.tests) {
+        const pathParts = testPath.replace(/\\/g, "/").split("/").filter((part) => part.length > 0);
+        const fileName = pathParts.pop();
+        if (!fileName) {
+          continue;
+        }
+        let folder = root;
+        for (const folderName of pathParts) {
+          const existingFolder = folder.folders.get(folderName);
+          if (existingFolder) {
+            folder = existingFolder;
+            continue;
+          }
+          const folderPath = folder.path.length > 0 ? `${folder.path}/${folderName}` : folderName;
+          const createdFolder = {
+            name: folderName,
+            path: folderPath,
+            folders: /* @__PURE__ */ new Map(),
+            files: []
+          };
+          folder.folders.set(folderName, createdFolder);
+          folder = createdFolder;
+        }
+        folder.files.push({ name: fileName, path: testPath });
+      }
+      return root;
+    }
+    renderTestTreeFolder(parent, folder) {
+      const childFolders = Array.from(folder.folders.values()).sort((left, right) => left.name.localeCompare(right.name));
+      const childFiles = [...folder.files].sort((left, right) => left.name.localeCompare(right.name));
+      for (const childFolder of childFolders) {
+        const item = document.createElement("li");
+        item.className = "lllts-test-tree-folder";
+        item.setAttribute("role", "treeitem");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "lllts-test-tree-folder-button";
+        button.setAttribute("aria-expanded", "false");
+        button.setAttribute("data-folder-path", childFolder.path);
+        this.appendTreeButtonContent(button, "lllts-test-tree-folder-icon", childFolder.name);
+        const children = document.createElement("ul");
+        children.className = "lllts-test-tree-children";
+        children.setAttribute("role", "group");
+        children.hidden = true;
+        this.renderTestTreeFolder(children, childFolder);
+        button.addEventListener("click", () => {
+          const shouldOpen = button.getAttribute("aria-expanded") !== "true";
+          button.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+          children.hidden = !shouldOpen;
+        });
+        item.appendChild(button);
+        item.appendChild(children);
+        parent.appendChild(item);
+      }
+      for (const childFile of childFiles) {
+        const item = document.createElement("li");
+        item.className = "lllts-test-tree-file";
+        item.setAttribute("role", "treeitem");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "lllts-test-tree-file-button";
+        button.title = childFile.path;
+        button.setAttribute("data-test-path", childFile.path);
+        this.appendTreeButtonContent(button, "lllts-test-tree-file-icon", childFile.name);
+        button.addEventListener("click", async () => {
+          if (this.isRunningAllTests) {
+            return;
+          }
+          await this.loadTestPreview(childFile.path, false);
+        });
+        item.appendChild(button);
+        parent.appendChild(item);
+      }
+    }
+    appendTreeButtonContent(button, iconClassName, label) {
+      const icon = document.createElement("span");
+      icon.className = iconClassName;
+      icon.setAttribute("aria-hidden", "true");
+      const text = document.createElement("span");
+      text.className = "lllts-test-tree-label";
+      text.textContent = label;
+      button.appendChild(icon);
+      button.appendChild(text);
     }
     captureElements() {
       this.backdrop = document.getElementById("lllts-overlay-backdrop");
@@ -856,6 +970,26 @@
         return currentUrl.searchParams.get("automatic") === "true";
       } catch {
         return false;
+      }
+    }
+    applyShardFilter(testPaths) {
+      const shard = this.getConfiguredShard();
+      if (shard === null) {
+        return testPaths;
+      }
+      return testPaths.filter((_testPath, index) => index % shard.count === shard.index);
+    }
+    getConfiguredShard() {
+      try {
+        const params = new URL(window.location.href).searchParams;
+        const count = Number.parseInt(params.get("shardCount") ?? "", 10);
+        const index = Number.parseInt(params.get("shardIndex") ?? "", 10);
+        if (!Number.isFinite(count) || !Number.isFinite(index) || count < 2 || index < 0 || index >= count) {
+          return null;
+        }
+        return { index, count };
+      } catch {
+        return null;
       }
     }
     getConfiguredTestPath() {
@@ -955,7 +1089,7 @@
         button.disabled = !isEnabled;
       }
     }
-    storeScenarioResult(runContext, scenario, state, details) {
+    storeScenarioResult(runContext, scenario, state, details, durationMs) {
       if (!runContext || !scenario) {
         return;
       }
@@ -966,7 +1100,8 @@
       runContext.scenarioResultByMethod[methodName] = {
         title: String(scenario.title ?? methodName),
         state: String(state ?? "failed"),
-        details: String(details ?? "")
+        details: String(details ?? ""),
+        durationMs: Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0
       };
     }
     collectScenarioResults(runContext) {
@@ -979,14 +1114,16 @@
           results.push({
             title: resolvedResult.title,
             state: resolvedResult.state,
-            details: String(resolvedResult.details ?? "")
+            details: String(resolvedResult.details ?? ""),
+            durationMs: resolvedResult.durationMs
           });
           continue;
         }
         results.push({
           title: String(scenario.title ?? methodName ?? "scenario"),
           state: "failed",
-          details: ""
+          details: "",
+          durationMs: 0
         });
       }
       return results;
@@ -1052,6 +1189,7 @@
       this.scenarioApi.markScenarioSelection(this.popupScenariosList, scenario.methodName);
       this.scenarioApi.setScenarioState(this.popupScenariosList, scenario.methodName, "idle");
       this.setStatus(`Running scenario: ${scenario.title}`, false);
+      const scenarioStartedAt = Date.now();
       try {
         const scenarioOptions = {
           input: {
@@ -1073,13 +1211,13 @@
           `Scenario "${String(scenario.title ?? scenario.methodName ?? "scenario")}" in test ${String(runContext.selectedPath ?? "unknown-test")} timed out after ${String(runContext.stepTimeoutMs)}ms.`
         );
         this.scenarioApi.setScenarioState(this.popupScenariosList, scenario.methodName, "success");
-        this.storeScenarioResult(runContext, scenario, "passed", "");
+        this.storeScenarioResult(runContext, scenario, "passed", "", Date.now() - scenarioStartedAt);
         this.setStatus(`Scenario passed: ${scenario.title}`, false);
         return "passed";
       } catch (scenarioError) {
         const scenarioErrorText = this.errorMessage(scenarioError);
         this.scenarioApi.setScenarioState(this.popupScenariosList, scenario.methodName, "error");
-        this.storeScenarioResult(runContext, scenario, "failed", scenarioErrorText);
+        this.storeScenarioResult(runContext, scenario, "failed", scenarioErrorText, Date.now() - scenarioStartedAt);
         this.setStatus(scenarioErrorText, true);
         return "failed";
       }
@@ -1360,6 +1498,7 @@
             phase: "test",
             testPath
           });
+          const testStartedAt = Date.now();
           const testResult = await this.loadTestPreview(testPath, true);
           const status = testResult?.status ? String(testResult.status) : "failed";
           const failureDetails = String(testResult?.failureDetails ?? "");
@@ -1368,6 +1507,7 @@
             testPath,
             status,
             failureDetails,
+            durationMs: Date.now() - testStartedAt,
             scenarioResults
           });
           if (status !== "passed" && status !== "no-scenarios") {
@@ -1379,11 +1519,13 @@
         testReports.push({
           testPath: "<overlay-runner>",
           status: "failed",
+          durationMs: 0,
           scenarioResults: [
             {
               title: "Play All runtime",
               state: "failed",
-              details: this.errorMessage(runError)
+              details: this.errorMessage(runError),
+              durationMs: 0
             }
           ]
         });

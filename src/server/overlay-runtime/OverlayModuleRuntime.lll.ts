@@ -1,4 +1,7 @@
 export class OverlayModuleRuntime {
+	// Overlay tracing costs a CDP round trip per line and runs on the scenario hot path, so it is
+	// opt-in through ?debug=1 rather than always on.
+	private static readonly debugEnabled = OverlayModuleRuntime.readDebugFlag()
 	private static readonly nativeHTMLElementConstructor = typeof HTMLElement === "function" ? HTMLElement : null
 	private static readonly cacheBusterQueryParam = "__lllts_cb"
 	private static readonly debugPrefix = "[EvidyTS overlay]"
@@ -6,7 +9,22 @@ export class OverlayModuleRuntime {
 	private static readonly constructorTagMap = new Map<Function, string>()
 	private static readonly constructorAliasMap = new Map<Function, Function>()
 
+	public static isDebugEnabled(): boolean {
+		return OverlayModuleRuntime.debugEnabled
+	}
+
+	private static readDebugFlag(): boolean {
+		if (typeof window === "undefined" || typeof window.location !== "object") {
+			return false
+		}
+		const debugValue = new URLSearchParams(window.location.search).get("debug")
+		return debugValue === "1" || debugValue === "true"
+	}
+
 	public static debug(message: string, details?: unknown): void {
+		if (!OverlayModuleRuntime.debugEnabled) {
+			return
+		}
 		if (details === undefined) {
 			console.log(`${this.debugPrefix} ${message}`)
 			return
@@ -23,6 +41,9 @@ export class OverlayModuleRuntime {
 	}
 
 	public static identityProbe(message: string, details: Record<string, unknown>): void {
+		if (!OverlayModuleRuntime.debugEnabled) {
+			return
+		}
 		console.log(`${this.identityProbePrefix} ${message} ${JSON.stringify(details)}`)
 	}
 
@@ -252,13 +273,15 @@ export class OverlayModuleRuntime {
 	): Promise<{ subject: unknown, element: HTMLElement | null }> {
 		const effectiveHostClass = this.resolveEffectiveConstructor(HostClass) as (new () => unknown)
 		const registeredTag = this.findRegisteredTagForConstructor(HostClass) ?? this.findRegisteredTagForConstructor(effectiveHostClass)
-		this.debug("mountBehavioralSubject:start", {
+		if (this.debugEnabled) {
+			this.debug("mountBehavioralSubject:start", {
 			hostClass: this.describeClass(HostClass),
 			effectiveHostClass: this.describeClass(effectiveHostClass),
 			registeredTag,
 			renderHostChildCount: popupRenderHost.childElementCount,
-			nativeHTMLElement: this.describeClass(this.nativeHTMLElementConstructor)
-		})
+				nativeHTMLElement: this.describeClass(this.nativeHTMLElementConstructor)
+			})
+		}
 		this.clearRenderHost(popupRenderHost)
 		let subject: unknown
 		try {
@@ -267,7 +290,8 @@ export class OverlayModuleRuntime {
 			} else {
 				subject = new effectiveHostClass()
 			}
-			this.identityProbe("mountBehavioralSubject:constructed", {
+			if (this.debugEnabled) {
+				this.identityProbe("mountBehavioralSubject:constructed", {
 				hostClassName: typeof HostClass === "function" ? HostClass.name : "",
 				hostClassId: this.getFunctionIdentityId(HostClass),
 				effectiveHostClassName: typeof effectiveHostClass === "function" ? effectiveHostClass.name : "",
@@ -277,12 +301,13 @@ export class OverlayModuleRuntime {
 				subjectConstructorId: this.getFunctionIdentityId(this.getConstructorValue(subject)),
 				subjectInstanceofHostClass: typeof HostClass === "function" && subject instanceof HostClass,
 				subjectInstanceofEffectiveHostClass: typeof effectiveHostClass === "function" && subject instanceof effectiveHostClass,
-				registeredTag
-			})
-			this.debug("mountBehavioralSubject:constructed", {
-				subject: this.describeValue(subject),
-				subjectPrototypeChain: this.describePrototypeChain(Object.getPrototypeOf(subject))
-			})
+					registeredTag
+				})
+				this.debug("mountBehavioralSubject:constructed", {
+					subject: this.describeValue(subject),
+					subjectPrototypeChain: this.describePrototypeChain(Object.getPrototypeOf(subject))
+				})
+			}
 		} catch (error) {
 			this.debugError("mountBehavioralSubject:constructor failed", error, {
 				hostClass: this.describeClass(HostClass),

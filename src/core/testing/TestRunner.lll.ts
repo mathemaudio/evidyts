@@ -1,86 +1,61 @@
 import * as fs from "fs"
 import * as path from "path"
-import * as ts from "typescript"
 import { ClassDeclaration, MethodDeclaration, SourceFile } from "ts-morph"
-import * as util from "util"
 import { Spec } from "../../public/lll.lll"
 import { BaseRule } from "../BaseRule.lll"
 import { DiagnosticObject } from "../DiagnosticObject"
 import { FileVariantSupport } from "../variants/FileVariantSupport.lll"
+import { BrowserGlobalStubs } from "./globals/BrowserGlobalStubs.lll"
 import type { Phase } from "../rulesEngine/Phase"
 import { ProjectInitiator } from "../ProjectInitiator.lll"
 import { RuleCode } from "../rulesEngine/RuleCode"
 import type { ScenarioContext } from "../scenario/ScenarioContext"
 import type { ScenarioEntry } from "../scenario/ScenarioEntry"
 import type { ScenarioMetadata } from "../scenario/ScenarioMetadata"
+import type { ScenarioTimingRow } from "../scenario/ScenarioTimingRow"
+import { ScenarioConsoleCapture } from "../scenario/ScenarioConsoleCapture.lll"
+import { ScenarioParameterFactory } from "../scenario/ScenarioParameterFactory.lll"
 import { PairedHostSupport } from "./paired/PairedHostSupport.lll"
 import type { PairedHostKind } from "./paired/PairedHostKind"
+import type { ScenarioJobBinding } from "./workers/ScenarioJobBinding"
+import type { ScenarioJobResult } from "./workers/ScenarioJobResult"
+import { ScenarioWorkerPool } from "./workers/ScenarioWorkerPool.lll"
 import type { BehavioralTestReference } from "./references/BehavioralTestReference"
 import type { TestClassRecord } from "./TestClassRecord"
 import type { TestInventorySummary } from "./TestInventorySummary"
 import type { TestReport } from "./TestReport"
 import type { TestRunnerResult } from "./TestRunnerResult"
 import type { TestType } from "./TestType"
-import type { TsConfig } from "../config/TsConfig"
-import type { AssertFn, ScenarioParameter, ScreenshotFn, SubjectFactory, WaitForFn } from "../../public/lll.lll"
+import { CompiledOutputLocator } from "../config/CompiledOutputLocator.lll"
+import type { ScenarioParameter, SubjectFactory } from "../../public/lll.lll"
 //
 @Spec("Executes unit scenarios inside supported companion test classes and summarizes behavioral test inventory.")
 export class TestRunner {
+	private readonly testClassCache = new Map<string | null, TestClassRecord[]>()
 	private readonly projectRoot: string
-	private readonly rootDir: string
-	private readonly outDir: string
+	private readonly outputLocator: CompiledOutputLocator
 
 	constructor(private loader: ProjectInitiator, tsconfigPath: string) {
 		Spec("Initializes runtime paths and decorator-safe browser globals for test execution.")
-		TestRunner.populateFakeBrowserClassesForDecorators()
+		BrowserGlobalStubs.populate()
 		this.projectRoot = path.dirname(tsconfigPath)
-		const config = this.loadTsConfig(tsconfigPath)
-		this.rootDir = this.resolveRootDir(tsconfigPath, config)
-		this.outDir = path.resolve(this.projectRoot, config.compilerOptions?.outDir ?? "dist")
-	}
-
-	@Spec("Adds browser-like global class placeholders used by decorator metadata in Node runtime.")
-	private static populateFakeBrowserClassesForDecorators() {
-		const browserClasses = [
-			"Window", "Document", "Node", "Element", "HTMLElement", "HTMLDivElement", "HTMLSpanElement",
-			"HTMLButtllllement", "HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement", "HTMLOptillllement",
-			"HTMLFormElement", "HTMLFieldSetElement", "HTMLLegendElement", "HTMLParagraphElement", "HTMLAnchorElement",
-			"HTMLImageElement", "HTMLUListElement", "HTMLOListElement", "HTMLLIElement", "HTMLTableElement",
-			"HTMLTableCaptillllement", "HTMLTableRowElement", "HTMLTableCellElement", "HTMLTableSectillllement",
-			"HTMLHeadElement", "HTMLBodyElement", "HTMLTitleElement", "HTMLMetaElement", "HTMLBaseElement",
-			"HTMLLinkElement", "HTMLScriptElement", "HTMLStyleElement", "HTMLIFrameElement", "HTMLSlotElement",
-			"HTMLAudioElement", "HTMLVideoElement", "HTMLSourceElement", "HTMLTrackElement", "HTMLPictureElement",
-			"HTMLCanvasElement", "HTMLMapElement", "HTMLAreaElement", "HTMLDialogElement", "HTMLDetailsElement",
-			"HTMLSummaryElement", "HTMLProgressElement", "HTMLMeterElement", "HTMLTimeElement", "HTMLDataElement",
-			"HTMLQuoteElement", "HTMLBlockQuoteElement", "HTMLBRElement", "HTMLEmbedElement", "HTMLObjectElement",
-			"HTMLParamElement", "HTMLTemplateElement", "HTMLDListElement", "HTMLDirectoryElement", "HTMLMenuElement",
-			"HTMLMenuItemElement", "HTMLQuoteElement", "HTMLPictureElement", "HTMLSlotElement", "HTMLCanvasElement",
-			"HTMLContentElement", "HTMLShadowElement", "HTMLDetailsElement", "HTMLSummaryElement", "HTMLDialogElement",
-			"HTMLMediaElement", "HTMLAudioElement", "HTMLVideoElement", "HTMLSourceElement", "HTMLTrackElement",
-			"HTMLMeterElement", "HTMLProgressElement", "HTMLTimeElement", "HTMLHeadingElement", "HTMLHRElement",
-			"HTMLModElement", "HTMLMeterElement", "HTMLParagraphElement", "HTMLPreElement", "HTMLScriptElement",
-			"HTMLStyleElement", "HTMLTitleElement", "HTMLLegendElement", "HTMLFieldSetElement", "HTMLFormElement",
-			"HTMLLabelElement", "HTMLInputElement", "HTMLKeygenElement", "HTMLObjectElement", "HTMLSelectElement",
-			"HTMLSlotElement", "HTMLSourceElement", "HTMLTemplateElement", "HTMLTrackElement", "HTMLVideoElement",
-			"SVGElement", "SVGSVGElement", "SVGGraphicsElement", "SVGGElement", "SVGRectElement", "SVGImageElement",
-			"SVGPathElement", "SVGPolygllllement", "SVGPolylineElement", "SVGCircleElement", "SVGEllipseElement",
-			"SVGLineElement", "SVGTextElement", "SVGPatternElement", "SVGMarkerElement", "SVGGradientElement",
-			"SVGFilterElement", "SVGDefsElement", "SVGClipPathElement", "SVGMaskElement", "SVGForeignObjectElement",
-			"SVGUseElement", "SVGSymbolElement", "SVGTitleElement", "SVGDescElement", "SpeechSynthesisUtterance",
-			"MutationObserver", "IntersectionObserver", "ResizeObserver", "PerformanceObserver", "AbortController",
-			"AbortSignal", "Crypto", "SubtleCrypto", "URL", "URLSearchParams", "History", "Location",
-			"Navigator", "Screen", "DeviceMotilllvent", "DeviceOrientatilllvent", "MediaStream", "MediaStreamTrack",
-			"MediaRecorder", "WebSocket", "EventSource", "Worker", "SharedWorker", "MessageChannel",
-			"BroadcastChannel", "FileReader", "Blob", "File", "FormData", "DataTransfer", "DataTransferItem"
-		]
-		const target = globalThis as Record<string, unknown>
-		for (const className of browserClasses) {
-			target[className] = target[className] || {}
-		}
+		this.outputLocator = new CompiledOutputLocator(tsconfigPath)
 	}
 
 	@Spec("Executes every discovered test class and returns diagnostics.")
-	public async runAll(testTimeoutMs = 30000, testPath: string | null = null): Promise<TestRunnerResult> {
+	public async runAll(
+		testTimeoutMs = 600000,
+		testPath: string | null = null,
+		scenarioTimeoutMs = 15000,
+		workerCount = 1,
+		onScenarioFinished: (row: ScenarioTimingRow) => void = () => undefined
+	): Promise<TestRunnerResult> {
+		const unitScenarioCount = this.countScenarios(testPath, "unit")
+		const effectiveWorkerCount = ScenarioWorkerPool.resolveWorkerCount(workerCount, unitScenarioCount)
+		this.announceWorkerCount(effectiveWorkerCount, unitScenarioCount, workerCount > 0)
+		if (effectiveWorkerCount > 1) {
+			return await this.runAllInWorkers(testPath, scenarioTimeoutMs, effectiveWorkerCount, onScenarioFinished)
+		}
 		const diagnostics: DiagnosticObject[] = []
 		const reports: TestReport[] = []
 		const testRunStartedAt = Date.now()
@@ -145,30 +120,38 @@ export class TestRunner {
 						id: entry.metadata.id,
 						title: entry.metadata.title,
 						name: scenarioName,
-						status: "failed"
+						status: "failed",
+						durationMs: 0
 					})
 					reports.push(report)
 					return { diagnostics, reports }
 				}
 
+				const scenarioStartedAt = Date.now()
 				const failure = await this.runScenarioUnit(
 					context,
 					runtimeClass,
 					hostKind,
 					runtimeHostClass,
-					remainingTimeoutMs,
-					testTimeoutMs
+					Math.min(scenarioTimeoutMs, remainingTimeoutMs),
+					scenarioTimeoutMs
 				)
+				const scenarioStatus = failure === null ? "passed" : "failed"
+				const scenarioDurationMs = Date.now() - scenarioStartedAt
 				report.scenarios.push({
 					id: entry.metadata.id,
 					title: entry.metadata.title,
 					name: scenarioName,
-					status: failure === null ? "passed" : "failed"
+					status: scenarioStatus,
+					durationMs: scenarioDurationMs
 				})
+				onScenarioFinished({ owner: className, name: scenarioName, durationMs: scenarioDurationMs, status: scenarioStatus })
 
+				// A stuck scenario is bounded by --scenarioTimeoutMs and reported on its own; only the
+				// whole-suite budget stops the remaining scenarios from running.
 				if (failure !== null) {
 					diagnostics.push(failure)
-					if (failure.message.includes("Test run timed out after")) {
+					if (Date.now() - testRunStartedAt >= testTimeoutMs) {
 						reports.push(report)
 						return { diagnostics, reports }
 					}
@@ -179,6 +162,200 @@ export class TestRunner {
 		}
 
 		return { diagnostics, reports }
+	}
+
+	@Spec("Reports the resolved worker count before the run so both humans and tools can see the fan-out.")
+	private announceWorkerCount(effectiveWorkerCount: number, unitScenarioCount: number, wasRequested: boolean): void {
+		if (unitScenarioCount === 0) {
+			return
+		}
+		const source = wasRequested ? "requested" : "automatic"
+		console.log(`Scenario workers: ${String(effectiveWorkerCount)} (${source}, ${String(unitScenarioCount)} unit scenarios)`)
+	}
+
+	@Spec("Sizes and announces the browser shards the tunnel will run, one isolated context per shard.")
+	public planBrowserShards(testPath: string | null, requestedWorkerCount: number): number {
+		// The page only serves this project's own companions, unlike a node run, which executes the whole import graph.
+		const scenarioCount = this.countScenarios(testPath, null, true)
+		if (scenarioCount === 0) {
+			return 1
+		}
+		// Browser sharding stays opt-in: it removes the warm shared page that order-dependent scenarios silently rely on,
+		// so a suite has to be proven isolation-clean before a default could safely spread it across contexts.
+		// Shards are split by test file, so a suite can never be spread thinner than one file per shard.
+		const shardCount = requestedWorkerCount > 0
+			? ScenarioWorkerPool.resolveWorkerCount(requestedWorkerCount, this.countProjectTestFiles(testPath))
+			: 1
+		const source = requestedWorkerCount > 0 ? "requested" : "serial"
+		console.log(`Scenario workers: ${String(shardCount)} (${source}, ${String(scenarioCount)} browser scenarios)`)
+		return shardCount
+	}
+
+	@Spec("Counts this project's own runnable test files, which are the units a browser shard is split by.")
+	private countProjectTestFiles(testPath: string | null): number {
+		let fileCount = 0
+		for (const testClass of this.listTestClasses(testPath)) {
+			const hasScenarios = this.getScenarioMethods(testClass.exportedClass).length > 0
+			if (!hasScenarios || this.getTestTypeLiteral(testClass.exportedClass) === null) {
+				continue
+			}
+			if (path.isAbsolute(testClass.relativeFile)) {
+				continue
+			}
+			fileCount += 1
+		}
+		return fileCount
+	}
+
+	@Spec("Counts runnable scenarios, optionally of one test type and only inside this project, to size a run before it starts.")
+	private countScenarios(testPath: string | null, requiredTestType: string | null, insideProjectOnly = false): number {
+		let scenarioCount = 0
+		for (const testClass of this.listTestClasses(testPath)) {
+			const testType = this.getTestTypeLiteral(testClass.exportedClass)
+			if (testType === null || (requiredTestType !== null && testType !== requiredTestType)) {
+				continue
+			}
+			if (insideProjectOnly && path.isAbsolute(testClass.relativeFile)) {
+				continue
+			}
+			scenarioCount += this.getScenarioMethods(testClass.exportedClass).length
+		}
+		return scenarioCount
+	}
+
+	@Spec("Executes unit scenarios across worker processes and merges their results in discovery order.")
+	private async runAllInWorkers(
+		testPath: string | null,
+		scenarioTimeoutMs: number,
+		workerCount: number,
+		onScenarioFinished: (row: ScenarioTimingRow) => void
+	): Promise<TestRunnerResult> {
+		const diagnostics: DiagnosticObject[] = []
+		const reports: TestReport[] = []
+		const bindings = this.buildScenarioJobs(testPath, diagnostics, reports, scenarioTimeoutMs)
+		if (bindings.length === 0) {
+			return { diagnostics, reports }
+		}
+
+		const bindingByIndex = new Map(bindings.map(binding => [binding.job.index, binding]))
+		const pool = new ScenarioWorkerPool()
+		const results = await pool.run(bindings.map(binding => binding.job), workerCount, (result) => {
+			const binding = bindingByIndex.get(result.index)
+			if (binding === undefined) {
+				return
+			}
+			onScenarioFinished({
+				owner: binding.context.className,
+				name: binding.context.scenarioName,
+				durationMs: result.durationMs,
+				status: result.status
+			})
+		})
+		const resultByIndex = new Map<number, ScenarioJobResult>()
+		for (const result of results) {
+			resultByIndex.set(result.index, result)
+		}
+
+		for (const binding of bindings) {
+			const result = resultByIndex.get(binding.job.index)
+			const status = result?.status ?? "failed"
+			binding.report.scenarios.push({
+				id: binding.metadata.id,
+				title: binding.metadata.title,
+				name: binding.context.scenarioName,
+				status,
+				durationMs: result?.durationMs ?? 0
+			})
+			if (status === "passed") {
+				continue
+			}
+			diagnostics.push(this.buildDiagnostic(
+				binding.context,
+				"scenario",
+				new Error(result?.errorMessage ?? "Scenario produced no result."),
+				result?.logs ?? [],
+				""
+			))
+		}
+		return { diagnostics, reports }
+	}
+
+	@Spec("Turns discovered unit scenarios into dispatchable worker jobs bound to their report slots.")
+	private buildScenarioJobs(
+		testPath: string | null,
+		diagnostics: DiagnosticObject[],
+		reports: TestReport[],
+		scenarioTimeoutMs: number
+	): ScenarioJobBinding[] {
+		const bindings: ScenarioJobBinding[] = []
+		for (const testClass of this.listTestClasses(testPath)) {
+			const { file, exportedClass, className, relativeFile } = testClass
+			const scenarioEntries = this.getScenarioMethods(exportedClass)
+			const testType = scenarioEntries.length === 0 ? null : this.getTestTypeLiteral(exportedClass)
+			if (scenarioEntries.length === 0) {
+				continue
+			}
+			if (!testType) {
+				diagnostics.push(this.createMissingTestTypeDiagnostic(relativeFile, className, exportedClass.getStartLineNumber()))
+				continue
+			}
+			if (testType === "behavioral") {
+				continue
+			}
+			const compiledPath = this.outputLocator.getCompiledPath(file.getFilePath())
+			if (compiledPath === null || !fs.existsSync(compiledPath)) {
+				diagnostics.push(this.createModuleDiagnostic(file.getFilePath(), className))
+				continue
+			}
+			const hostKind = PairedHostSupport.getHostKind(file)
+			const hostClassName = PairedHostSupport.getHostClassName(file.getFilePath()) ?? className.replace(/Test2?$/, "")
+			const hostSourcePath = PairedHostSupport.getHostFilePath(file.getFilePath())
+			const hostCompiledPath = hostKind === "instantiable" && hostSourcePath !== null
+				? this.outputLocator.getCompiledPath(hostSourcePath)
+				: null
+			if (hostKind === "instantiable" && (hostCompiledPath === null || !fs.existsSync(hostCompiledPath))) {
+				diagnostics.push(this.createModuleDiagnostic(file.getFilePath(), hostClassName))
+				continue
+			}
+
+			const report: TestReport = {
+				className,
+				filePath: relativeFile,
+				line: exportedClass.getStartLineNumber(),
+				scenarios: []
+			}
+			reports.push(report)
+			for (const entry of scenarioEntries) {
+				const methodName = entry.method.getName()
+				if (!methodName) {
+					continue
+				}
+				const scenarioName = entry.metadata.title ?? entry.metadata.id ?? methodName
+				bindings.push({
+					job: {
+						index: bindings.length,
+						compiledPath,
+						className,
+						scenarioMethodName: methodName,
+						scenarioName,
+						hostKind,
+						hostCompiledPath,
+						hostClassName,
+						scenarioTimeoutMs
+					},
+					context: {
+						className,
+						filePath: relativeFile,
+						scenarioMethodName: methodName,
+						scenarioName,
+						line: entry.method.getStartLineNumber()
+					},
+					metadata: entry.metadata,
+					report
+				})
+			}
+		}
+		return bindings
 	}
 
 	@Spec("Builds deterministic inventory data for behavioral test classes.")
@@ -225,45 +402,6 @@ export class TestRunner {
 		return matchedTest?.relativeFile ?? null
 	}
 
-	@Spec("Reads compiler options for locating compiled files.")
-	private loadTsConfig(configPath: string): TsConfig {
-		const raw = fs.readFileSync(configPath, "utf-8")
-		return JSON.parse(raw)
-	}
-
-	@Spec("Resolves the effective source root, matching TypeScript when rootDir is omitted.")
-	private resolveRootDir(configPath: string, config: TsConfig): string {
-		const configuredRootDir = config.compilerOptions?.rootDir
-		if (configuredRootDir !== undefined && configuredRootDir.length > 0) {
-			return path.resolve(this.projectRoot, configuredRootDir)
-		}
-
-		const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
-		if (configFile.error !== undefined) {
-			return path.resolve(this.projectRoot, "src")
-		}
-
-		const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, this.projectRoot)
-		const commonSourceDirectory = (ts as unknown as {
-			getCommonSourceDirectory: (
-				options: ts.CompilerOptions,
-				emittedFiles: () => string[],
-				currentDirectory: string,
-				getCanonicalFileName: (fileName: string) => string
-			) => string
-		}).getCommonSourceDirectory(
-			parsed.options,
-			() => parsed.fileNames,
-			this.projectRoot,
-			ts.sys.useCaseSensitiveFileNames ? fileName => fileName : fileName => fileName.toLowerCase()
-		)
-		if (commonSourceDirectory.length > 0) {
-			return path.resolve(commonSourceDirectory)
-		}
-
-		return path.resolve(this.projectRoot, "src")
-	}
-
 	@Spec("Returns static scenario methods decorated with @Scenario.")
 	private getScenarioMethods(classDecl: ClassDeclaration): ScenarioEntry[] {
 		return classDecl.getMethods()
@@ -285,6 +423,10 @@ export class TestRunner {
 
 	@Spec("Collects executable test classes from discovered companion test files in deterministic order.")
 	private listTestClasses(testPath: string | null = null): TestClassRecord[] {
+		const cached = this.testClassCache.get(testPath)
+		if (cached !== undefined) {
+			return cached
+		}
 		const records: TestClassRecord[] = []
 		const files = this.loader.getFiles()
 
@@ -323,10 +465,11 @@ export class TestRunner {
 			}
 			return a.className.localeCompare(b.className)
 		})
-		if (testPath === null) {
-			return sortedRecords
-		}
-		return sortedRecords.filter(record => record.relativeFile === testPath)
+		const selectedRecords = testPath === null
+			? sortedRecords
+			: sortedRecords.filter(record => record.relativeFile === testPath)
+		this.testClassCache.set(testPath, selectedRecords)
+		return selectedRecords
 	}
 
 	@Spec("Requires the compiled JS module and returns the requested exported binding.")
@@ -336,7 +479,7 @@ export class TestRunner {
 
 	@Spec("Requires the compiled JS module for a given path and returns the requested exported binding.")
 	private loadRuntimeExportByPath(sourcePath: string, exportName: string, overridePath?: string | null): Record<string, unknown> | null {
-		const compiledPath = this.getCompiledPath(overridePath ?? sourcePath)
+		const compiledPath = this.outputLocator.getCompiledPath(overridePath ?? sourcePath)
 		if (!compiledPath || !fs.existsSync(compiledPath)) {
 			return null
 		}
@@ -346,17 +489,6 @@ export class TestRunner {
 		return typeof classRef === "object" || typeof classRef === "function"
 			? (classRef as Record<string, unknown>)
 			: null
-	}
-
-	@Spec("Maps a source file path to its compiled JavaScript output.")
-	private getCompiledPath(sourcePath: string): string | null {
-		const relative = path.relative(this.rootDir, sourcePath)
-		if (relative.startsWith("..")) {
-			return null
-		}
-		const parsed = path.parse(relative)
-		const compiledFile = path.join(this.outDir, parsed.dir, `${parsed.name}.js`)
-		return compiledFile
 	}
 
 	@Spec("Executes a scenario method in unit mode, returning diagnostic on failure.")
@@ -369,8 +501,8 @@ export class TestRunner {
 		testRunTimeoutMs = timeoutMs
 	): Promise<DiagnosticObject | null> {
 		const capturedLogs: string[] = []
-		const restoreConsole = this.hookConsole(capturedLogs)
-		const scenario = this.createScenarioParameter()
+		const restoreConsole = ScenarioConsoleCapture.hook(capturedLogs)
+		const scenario = ScenarioParameterFactory.create()
 
 		try {
 			const scenarioFn = runtimeClass[context.scenarioMethodName]
@@ -398,7 +530,7 @@ export class TestRunner {
 				await this.runWithTimeout(
 					executeScenario,
 					timeoutMs,
-					`Test run timed out after ${testRunTimeoutMs}ms while running scenario "${context.scenarioName}" in ${context.filePath}.`
+					`Scenario "${context.scenarioName}" in ${context.filePath} timed out after ${testRunTimeoutMs}ms. Raise --scenarioTimeoutMs only when the scenario legitimately needs longer; otherwise it is stuck.`
 				)
 			} catch (error) {
 				return this.buildDiagnostic(context, "scenario", error, capturedLogs, "")
@@ -415,7 +547,7 @@ export class TestRunner {
 		return this.buildDiagnostic(
 			context,
 			"scenario",
-			new Error(`Test run timed out after ${testTimeoutMs}ms before scenario "${context.scenarioName}" could start.`),
+			new Error(`Test run exceeded the whole-suite budget of ${testTimeoutMs}ms before scenario "${context.scenarioName}" could start. Raise --testTimeoutMs for a legitimately long suite.`),
 			[],
 			""
 		)
@@ -435,23 +567,6 @@ export class TestRunner {
 			if (timeoutHandle !== null) {
 				clearTimeout(timeoutHandle)
 			}
-		}
-	}
-
-	@Spec("Builds the shared scenario helper object passed into scenario methods.")
-	private createScenarioParameter(): ScenarioParameter {
-		return {
-			input: {},
-			assert: this.createAssert(),
-			waitFor: this.createWaitFor(),
-			screenshot: this.createScreenshot()
-		}
-	}
-
-	@Spec("Builds a screenshot helper placeholder for non-browser unit scenario execution.")
-	private createScreenshot(): ScreenshotFn {
-		return async (_filePath: string): Promise<void> => {
-			throw new Error("Browser tunnel unavailable: scenario.screenshot(path) can only capture screenshots while behavioral tests run through --clientTunnel.")
 		}
 	}
 
@@ -509,7 +624,7 @@ export class TestRunner {
 
 	@Spec("Reports missing compiled module for a class.")
 	private createModuleDiagnostic(file: string, className: string): DiagnosticObject {
-		const relativeOutDir = path.relative(this.projectRoot, this.outDir)
+		const relativeOutDir = path.relative(this.projectRoot, this.outputLocator.getOutDir())
 		return {
 			file,
 			line: 0,
@@ -549,7 +664,7 @@ export class TestRunner {
 	): DiagnosticObject {
 		const messageLines = [
 			`Test ${context.className}.${context.scenarioMethodName} scenario "${context.scenarioName}" failed during ${phase}.`,
-			`Reason: ${this.formatError(error)}`
+			`Reason: ${ScenarioConsoleCapture.formatError(error)}`
 		]
 
 		const cleanedHtml = htmlSnapshot.trim()
@@ -568,95 +683,6 @@ export class TestRunner {
 			severity: "error",
 			ruleCode: this.getRuleCode()
 		}
-	}
-
-	@Spec("Produces a human-readable error message.")
-	private formatError(error: unknown): string {
-		if (error instanceof Error) {
-			const stack = error.stack ?? error.message ?? String(error)
-			const lines = stack.split("\n").map(line => line.trimEnd())
-			if (lines.length <= 3) {
-				return lines.join("\n")
-			}
-
-			const [headline, ...rest] = lines
-			const shortened = rest.slice(-2)
-			return [headline, ...shortened].join("\n")
-		}
-
-		if (typeof error === "string") {
-			return error
-		}
-
-		return util.inspect(error, { depth: 4, colors: false })
-	}
-
-	@Spec("Creates an assertion helper used inside scenarios.")
-	private createAssert(): (condition: boolean, message?: string) => void {
-		return (condition: boolean, message = "Assertion failed"): asserts condition => {
-			if (!condition) {
-				throw new Error(message)
-			}
-		}
-	}
-
-	@Spec("Creates a polling helper for asynchronous scenario conditions.")
-	private createWaitFor(): (
-		predicate: () => boolean | Promise<boolean>,
-		message: string,
-		timeoutMs?: number,
-		intervalMs?: number
-	) => Promise<void> {
-		return async (
-			predicate: () => boolean | Promise<boolean>,
-			message: string,
-			timeoutMs = 1200,
-			intervalMs = 20
-		): Promise<void> => {
-			const startTime = Date.now()
-			while (Date.now() - startTime < timeoutMs) {
-				if (await predicate()) {
-					return
-				}
-				await this.sleep(intervalMs)
-			}
-
-			throw new Error(`Condition was not met within ${timeoutMs}ms: ${message}`)
-		}
-	}
-
-	@Spec("Sleeps between waitFor polling attempts.")
-	private async sleep(durationMs: number): Promise<void> {
-		await new Promise<void>((resolve) => setTimeout(resolve, durationMs))
-	}
-
-	@Spec("Captures console output during scenario execution.")
-	private hookConsole(logs: string[]): () => void {
-		const originalLog = console.log
-		const originalWarn = console.warn
-		const originalError = console.error
-
-		console.log = (...args: unknown[]) => {
-			logs.push(this.formatLog("log", args))
-		}
-		console.warn = (...args: unknown[]) => {
-			logs.push(this.formatLog("warn", args))
-		}
-		console.error = (...args: unknown[]) => {
-			logs.push(this.formatLog("error", args))
-		}
-
-		return () => {
-			console.log = originalLog
-			console.warn = originalWarn
-			console.error = originalError
-		}
-	}
-
-	@Spec("Formats console output for diagnostics.")
-	private formatLog(level: "log" | "warn" | "error", args: unknown[]): string {
-		const rendered = args.map(arg => typeof arg === "string" ? arg : util.inspect(arg, { depth: 4, colors: false }))
-		return `[${level}] ${rendered.join(" ")}`
 	}
 
 	@Spec("Returns the diagnostic rule code used by this runner.")

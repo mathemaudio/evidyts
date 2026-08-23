@@ -12,13 +12,26 @@ type OverlayRunContext = {
 	activeTestType: string | null
 	activePreviewElement: HTMLElement | null
 	activePreviewSubject: unknown
-	scenarioResultByMethod: Record<string, { title: string, state: string, details: string }>
+	scenarioResultByMethod: Record<string, { title: string, state: string, details: string, durationMs: number }>
 }
 
 type OverlayTestResult = {
 	status: string
 	failureDetails?: string
-	scenarioResults: Array<{ title: string, state: string, details: string }>
+	durationMs?: number
+	scenarioResults: Array<{ title: string, state: string, details: string, durationMs: number }>
+}
+
+type OverlayTestTreeFile = {
+	name: string
+	path: string
+}
+
+type OverlayTestTreeFolder = {
+	name: string
+	path: string
+	folders: Map<string, OverlayTestTreeFolder>
+	files: OverlayTestTreeFile[]
 }
 
 export class OverlayController {
@@ -53,9 +66,10 @@ export class OverlayController {
 	public constructor(private readonly config: Record<string, unknown>) {
 		const configuredTests = Array.isArray(config.tests) ? config.tests.map(testPath => String(testPath ?? "")) : []
 		const selectedTestPath = this.getConfiguredTestPath()
-		this.tests = selectedTestPath === null
+		const chosenTests = selectedTestPath === null
 			? configuredTests
 			: configuredTests.filter(testPath => testPath === selectedTestPath)
+		this.tests = this.applyShardFilter(chosenTests)
 		this.openByDefault = !!config.openByDefault
 	}
 
@@ -123,27 +137,126 @@ export class OverlayController {
 			this.list.textContent = ""
 		}
 
-		for (const testPath of this.tests) {
-			const item = document.createElement("li")
-			const button = document.createElement("button")
-			button.type = "button"
-			button.textContent = testPath
-			button.setAttribute("data-test-path", testPath)
-			button.addEventListener("click", async () => {
-				if (this.isRunningAllTests) {
-					return
-				}
-				await this.loadTestPreview(testPath, false)
-			})
-			item.appendChild(button)
-			this.list?.appendChild(item)
-		}
+		this.renderTestTree()
 
 		if (this.shouldAutoRunFromQuery()) {
 			setTimeout(() => {
 				void this.runPanelPlayAllSequence(true)
 			}, 0)
 		}
+	}
+
+	private renderTestTree(): void {
+		if (!this.list) {
+			return
+		}
+		const root = this.buildTestTree()
+		this.renderTestTreeFolder(this.list, root)
+	}
+
+	private buildTestTree(): OverlayTestTreeFolder {
+		const root: OverlayTestTreeFolder = {
+			name: "",
+			path: "",
+			folders: new Map<string, OverlayTestTreeFolder>(),
+			files: []
+		}
+
+		for (const testPath of this.tests) {
+			const pathParts = testPath.replace(/\\/g, "/").split("/").filter(part => part.length > 0)
+			const fileName = pathParts.pop()
+			if (!fileName) {
+				continue
+			}
+
+			let folder = root
+			for (const folderName of pathParts) {
+				const existingFolder = folder.folders.get(folderName)
+				if (existingFolder) {
+					folder = existingFolder
+					continue
+				}
+				const folderPath = folder.path.length > 0 ? `${folder.path}/${folderName}` : folderName
+				const createdFolder: OverlayTestTreeFolder = {
+					name: folderName,
+					path: folderPath,
+					folders: new Map<string, OverlayTestTreeFolder>(),
+					files: []
+				}
+				folder.folders.set(folderName, createdFolder)
+				folder = createdFolder
+			}
+			folder.files.push({ name: fileName, path: testPath })
+		}
+
+		return root
+	}
+
+	private renderTestTreeFolder(parent: HTMLElement, folder: OverlayTestTreeFolder): void {
+		const childFolders = Array.from(folder.folders.values()).sort((left, right) => left.name.localeCompare(right.name))
+		const childFiles = [...folder.files].sort((left, right) => left.name.localeCompare(right.name))
+
+		for (const childFolder of childFolders) {
+			const item = document.createElement("li")
+			item.className = "lllts-test-tree-folder"
+			item.setAttribute("role", "treeitem")
+
+			const button = document.createElement("button")
+			button.type = "button"
+			button.className = "lllts-test-tree-folder-button"
+			button.setAttribute("aria-expanded", "false")
+			button.setAttribute("data-folder-path", childFolder.path)
+			this.appendTreeButtonContent(button, "lllts-test-tree-folder-icon", childFolder.name)
+
+			const children = document.createElement("ul")
+			children.className = "lllts-test-tree-children"
+			children.setAttribute("role", "group")
+			children.hidden = true
+			this.renderTestTreeFolder(children, childFolder)
+
+			button.addEventListener("click", () => {
+				const shouldOpen = button.getAttribute("aria-expanded") !== "true"
+				button.setAttribute("aria-expanded", shouldOpen ? "true" : "false")
+				children.hidden = !shouldOpen
+			})
+
+			item.appendChild(button)
+			item.appendChild(children)
+			parent.appendChild(item)
+		}
+
+		for (const childFile of childFiles) {
+			const item = document.createElement("li")
+			item.className = "lllts-test-tree-file"
+			item.setAttribute("role", "treeitem")
+
+			const button = document.createElement("button")
+			button.type = "button"
+			button.className = "lllts-test-tree-file-button"
+			button.title = childFile.path
+			button.setAttribute("data-test-path", childFile.path)
+			this.appendTreeButtonContent(button, "lllts-test-tree-file-icon", childFile.name)
+			button.addEventListener("click", async () => {
+				if (this.isRunningAllTests) {
+					return
+				}
+				await this.loadTestPreview(childFile.path, false)
+			})
+
+			item.appendChild(button)
+			parent.appendChild(item)
+		}
+	}
+
+	private appendTreeButtonContent(button: HTMLButtonElement, iconClassName: string, label: string): void {
+		const icon = document.createElement("span")
+		icon.className = iconClassName
+		icon.setAttribute("aria-hidden", "true")
+		const text = document.createElement("span")
+		text.className = "lllts-test-tree-label"
+		text.textContent = label
+		button.appendChild(icon)
+		button.appendChild(text)
 	}
 
 	private captureElements(): boolean {
@@ -234,6 +347,29 @@ export class OverlayController {
 			return currentUrl.searchParams.get("automatic") === "true"
 		} catch {
 			return false
+		}
+	}
+
+	private applyShardFilter(testPaths: string[]): string[] {
+		const shard = this.getConfiguredShard()
+		if (shard === null) {
+			return testPaths
+		}
+		// Every shard receives the identical ordered list, so a stride keeps the split deterministic without coordination.
+		return testPaths.filter((_testPath, index) => index % shard.count === shard.index)
+	}
+
+	private getConfiguredShard(): { index: number, count: number } | null {
+		try {
+			const params = new URL(window.location.href).searchParams
+			const count = Number.parseInt(params.get("shardCount") ?? "", 10)
+			const index = Number.parseInt(params.get("shardIndex") ?? "", 10)
+			if (!Number.isFinite(count) || !Number.isFinite(index) || count < 2 || index < 0 || index >= count) {
+				return null
+			}
+			return { index, count }
+		} catch {
+			return null
 		}
 	}
 
@@ -349,7 +485,7 @@ export class OverlayController {
 		}
 	}
 
-	private storeScenarioResult(runContext: OverlayRunContext, scenario: { methodName: string, title: string } | null, state: string, details: string): void {
+	private storeScenarioResult(runContext: OverlayRunContext, scenario: { methodName: string, title: string } | null, state: string, details: string, durationMs: number): void {
 		if (!runContext || !scenario) {
 			return
 		}
@@ -360,12 +496,13 @@ export class OverlayController {
 		runContext.scenarioResultByMethod[methodName] = {
 			title: String(scenario.title ?? methodName),
 			state: String(state ?? "failed"),
-			details: String(details ?? "")
+			details: String(details ?? ""),
+			durationMs: Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0
 		}
 	}
 
-	private collectScenarioResults(runContext: OverlayRunContext): Array<{ title: string, state: string, details: string }> {
-		const results: Array<{ title: string, state: string, details: string }> = []
+	private collectScenarioResults(runContext: OverlayRunContext): Array<{ title: string, state: string, details: string, durationMs: number }> {
+		const results: Array<{ title: string, state: string, details: string, durationMs: number }> = []
 		const scenarios = Array.isArray(runContext?.selectedScenarios) ? runContext.selectedScenarios : []
 		for (const scenario of scenarios) {
 			const methodName = String(scenario.methodName ?? "")
@@ -374,14 +511,16 @@ export class OverlayController {
 				results.push({
 					title: resolvedResult.title,
 					state: resolvedResult.state,
-					details: String(resolvedResult.details ?? "")
+					details: String(resolvedResult.details ?? ""),
+					durationMs: resolvedResult.durationMs
 				})
 				continue
 			}
 			results.push({
 				title: String(scenario.title ?? methodName ?? "scenario"),
 				state: "failed",
-				details: ""
+				details: "",
+				durationMs: 0
 			})
 		}
 		return results
@@ -450,6 +589,7 @@ export class OverlayController {
 		this.scenarioApi.markScenarioSelection(this.popupScenariosList, scenario.methodName)
 		this.scenarioApi.setScenarioState(this.popupScenariosList, scenario.methodName, "idle")
 		this.setStatus(`Running scenario: ${scenario.title}`, false)
+		const scenarioStartedAt = Date.now()
 		try {
 			const scenarioOptions: Record<string, unknown> = {
 				input: {
@@ -471,13 +611,13 @@ export class OverlayController {
 				`Scenario "${String(scenario.title ?? scenario.methodName ?? "scenario")}" in test ${String(runContext.selectedPath ?? "unknown-test")} timed out after ${String(runContext.stepTimeoutMs)}ms.`
 			)
 			this.scenarioApi.setScenarioState(this.popupScenariosList, scenario.methodName, "success")
-			this.storeScenarioResult(runContext, scenario, "passed", "")
+			this.storeScenarioResult(runContext, scenario, "passed", "", Date.now() - scenarioStartedAt)
 			this.setStatus(`Scenario passed: ${scenario.title}`, false)
 			return "passed"
 		} catch (scenarioError) {
 			const scenarioErrorText = this.errorMessage(scenarioError)
 			this.scenarioApi.setScenarioState(this.popupScenariosList, scenario.methodName, "error")
-			this.storeScenarioResult(runContext, scenario, "failed", scenarioErrorText)
+			this.storeScenarioResult(runContext, scenario, "failed", scenarioErrorText, Date.now() - scenarioStartedAt)
 			this.setStatus(scenarioErrorText, true)
 			return "failed"
 		}
@@ -766,7 +906,8 @@ export class OverlayController {
 			testPath: string
 			status: string
 			failureDetails?: string
-			scenarioResults: Array<{ title: string, state: string, details: string }>
+			durationMs: number
+			scenarioResults: Array<{ title: string, state: string, details: string, durationMs: number }>
 		}> = []
 
 		try {
@@ -777,6 +918,7 @@ export class OverlayController {
 					phase: "test",
 					testPath
 				})
+				const testStartedAt = Date.now()
 				const testResult = await this.loadTestPreview(testPath, true)
 				const status = testResult?.status ? String(testResult.status) : "failed"
 				const failureDetails = String(testResult?.failureDetails ?? "")
@@ -785,6 +927,7 @@ export class OverlayController {
 					testPath,
 					status,
 					failureDetails,
+					durationMs: Date.now() - testStartedAt,
 					scenarioResults
 				})
 				if (status !== "passed" && status !== "no-scenarios") {
@@ -796,11 +939,13 @@ export class OverlayController {
 			testReports.push({
 				testPath: "<overlay-runner>",
 				status: "failed",
+				durationMs: 0,
 				scenarioResults: [
 					{
 						title: "Play All runtime",
 						state: "failed",
-						details: this.errorMessage(runError)
+						details: this.errorMessage(runError),
+						durationMs: 0
 					}
 				]
 			})

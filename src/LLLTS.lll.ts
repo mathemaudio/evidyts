@@ -2,12 +2,16 @@
 import type { ClientTunnelConfig } from "./ClientTunnelConfig"
 import { LoadStrategy } from "./LoadStrategy"
 import type { MainResult } from "./MainResult"
+import type { RunTuning } from "./RunTuning"
 import type { ServerModeConfig } from "./ServerModeConfig"
 import packageJson from "../package.json"
 import { BaseRule } from "./core/BaseRule.lll"
 import { ProjectInitiator } from "./core/ProjectInitiator.lll"
 import { ResultReporter } from "./core/ResultReporter.lll"
 import { RulesEngine } from "./core/rulesEngine/RulesEngine.lll"
+import { ScenarioTimingReport } from "./core/testing/ScenarioTimingReport.lll"
+import { ScenarioWorkerPool } from "./core/testing/workers/ScenarioWorkerPool.lll"
+import { ScenarioWorkerRuntime } from "./core/testing/workers/ScenarioWorkerRuntime.lll"
 import type { TestInventorySummary } from "./core/testing/TestInventorySummary"
 import type { TestReport } from "./core/testing/TestReport"
 import { TestRunner } from "./core/testing/TestRunner.lll"
@@ -19,8 +23,15 @@ import { LlltsServer } from "./server/LlltsServer.lll"
 
 @Spec("CLI entry that loads an EvidyTS project, applies rules, and reports diagnostics.")
 export class LLLTS {
+	private static readonly defaultScenarioTimeoutMs = 15000
+	private static readonly defaultSuiteTimeoutMs = 600000
+
 	@Spec("Reads CLI args and runs EvidyTS checks on the target project.")
 	public static async main(args: string[]): Promise<MainResult> {
+		if (args.includes(ScenarioWorkerPool.workerFlag)) {
+			ScenarioWorkerRuntime.listen()
+			return { mode: "worker" }
+		}
 		const serverModeResult = await this.tryRunServerMode(args)
 		if (serverModeResult !== null) {
 			return serverModeResult
@@ -30,6 +41,8 @@ export class LLLTS {
 		const entryFile = this.getArg(args, "--entry")
 		const loadStrategy = this.getOptionalArg(args, "--load-strategy", "from_imports") as LoadStrategy
 		const verbose = this.hasFlag(args, "--verbose")
+		const timings = this.hasFlag(args, "--timings")
+		const timingsFilePath = this.parseTimingsFilePath(args)
 		const noTests = this.hasFlag(args, "--noTests")
 		const failSafeMode = this.hasFlag(args, "--fail-safe")
 		const testPathResult = this.parseOptionalArgValue(args, "--testPath")
@@ -38,12 +51,12 @@ export class LLLTS {
 			return { mode: "compile", exitCode: 1 }
 		}
 		const requestedTestPath = testPathResult.value
-		const testTimeoutResult = this.parseOptionalPositiveIntegerArg(args, "--testTimeoutMs", 30000)
-		if (!testTimeoutResult.valid) {
-			console.error(`\n❌ ${testTimeoutResult.error}`)
+		const tuningResult = this.parseRunTuning(args)
+		if (!tuningResult.valid) {
+			console.error(`\n❌ ${tuningResult.error}`)
 			return { mode: "compile", exitCode: 1 }
 		}
-		const testTimeoutMs = testTimeoutResult.value
+		const { testTimeoutMs, scenarioTimeoutMs, workerCount } = tuningResult.tuning
 		const clientTunnelConfigResult = this.parseClientTunnelConfig(args)
 		if (!clientTunnelConfigResult.valid) {
 			console.error(`\n❌ ${clientTunnelConfigResult.error}`)
@@ -58,6 +71,9 @@ export class LLLTS {
 		let loader: ProjectInitiator
 		try {
 			loader = new ProjectInitiator(projectPath, loadStrategy, entryFile)
+			if (requestedTestPath !== null) {
+				loader.addTargetTestFile(requestedTestPath)
+			}
 		} catch (error) {
 			console.error(`\n❌ ${error instanceof Error ? error.message : String(error)}`)
 			return { mode: "compile", exitCode: 1 }
@@ -78,6 +94,9 @@ export class LLLTS {
 		let reports: TestReport[] = []
 		let selectedTestPath: string | null = null
 		const skipNodeTestExecution = clientTunnelConfig.url !== null
+		let browserShardCount = 1
+		const timingReport = timings ? new ScenarioTimingReport(timingsFilePath) : null
+		timingReport?.begin()
 		if (!noTests) {
 			const testRunner = new TestRunner(loader, projectPath)
 			selectedTestPath = requestedTestPath === null ? null : testRunner.resolveTestPath(requestedTestPath)
@@ -85,8 +104,11 @@ export class LLLTS {
 				scenarioDiagnostics.push(this.createTestPathNotFoundDiagnostic(requestedTestPath))
 			} else {
 				inventory = testRunner.summarizeInventory(selectedTestPath)
-				if (!skipNodeTestExecution) {
-					const testRunResult = await testRunner.runAll(testTimeoutMs, selectedTestPath)
+				if (skipNodeTestExecution) {
+					browserShardCount = testRunner.planBrowserShards(selectedTestPath, workerCount)
+				} else {
+					timingReport?.appendSection("Unit scenario timings (node)")
+					const testRunResult = await testRunner.runAll(testTimeoutMs, selectedTestPath, scenarioTimeoutMs, workerCount, row => timingReport?.appendScenario(row))
 					scenarioDiagnostics = testRunResult.diagnostics
 					reports = testRunResult.reports
 				}
@@ -101,16 +123,9 @@ export class LLLTS {
 		let clientTunnelResult: ClientTunnelRunResult | null = null
 		const diagnosticsFailedBeforeClientTunnel = allDiagnostics.some(r => r.severity === "error")
 		if (!noTests && !diagnosticsFailedBeforeClientTunnel && inventory.hasBehavioralTests && clientTunnelConfig.url !== null) {
-			const runner = new ClientTunnelRunner()
-			clientTunnelResult = await runner.run({
-				url: clientTunnelConfig.url,
-				headed: clientTunnelConfig.headed,
-				timeoutMs: clientTunnelConfig.timeoutMs,
-				testTimeoutMs,
-				testPath: selectedTestPath,
-				projectRoot: loader.getProjectRootDir()
-			})
+			clientTunnelResult = await this.runClientTunnel(clientTunnelConfig, tuningResult.tuning, selectedTestPath, loader.getProjectRootDir(), browserShardCount)
 			allDiagnostics.push(...this.mapClientTunnelResultToDiagnostics(clientTunnelResult, inventory))
+			timingReport?.appendTunnelReport(clientTunnelResult.reportJson, clientTunnelResult.timings)
 			this.printClientTunnelOutput(clientTunnelResult, verbose)
 		}
 		// const bad = new BadExample2()
@@ -121,6 +136,7 @@ export class LLLTS {
 		if (verbose && !noTests) {
 			this.printTestSummary(reports, inventory.hasBehavioralTests, skipNodeTestExecution)
 		}
+		timingReport?.finish()
 		reporter.print(allDiagnostics, { suppressSuccessMessage: tunnelFailed })
 		if (tunnelFailed) {
 			console.error("\n❌ Behavioral tests failed.")
@@ -128,6 +144,50 @@ export class LLLTS {
 
 		const diagnosticsFailed = allDiagnostics.some(r => r.severity === "error")
 		return { mode: "compile", exitCode: diagnosticsFailed || tunnelFailed ? 1 : 0 }
+	}
+
+	@Spec("Runs the behavioral browser tunnel with the resolved timeouts for this compile run.")
+	private static async runClientTunnel(
+		clientTunnelConfig: ClientTunnelConfig,
+		tuning: RunTuning,
+		selectedTestPath: string | null,
+		projectRoot: string,
+		shardCount: number
+	): Promise<ClientTunnelRunResult> {
+		return await new ClientTunnelRunner().run({
+			url: clientTunnelConfig.url ?? "",
+			headed: clientTunnelConfig.headed,
+			timeoutMs: clientTunnelConfig.timeoutMs,
+			testTimeoutMs: tuning.testTimeoutMs,
+			scenarioTimeoutMs: tuning.scenarioTimeoutMs,
+			testPath: selectedTestPath,
+			projectRoot,
+			shardCount
+		})
+	}
+
+	@Spec("Parses the whole-suite budget, the per-scenario timeout, and the requested worker count.")
+	private static parseRunTuning(args: string[]): { valid: true; tuning: RunTuning } | { valid: false; error: string } {
+		const testTimeoutResult = this.parseOptionalPositiveIntegerArg(args, "--testTimeoutMs", LLLTS.defaultSuiteTimeoutMs)
+		if (!testTimeoutResult.valid) {
+			return testTimeoutResult
+		}
+		const scenarioTimeoutResult = this.parseOptionalPositiveIntegerArg(args, "--scenarioTimeoutMs", LLLTS.defaultScenarioTimeoutMs)
+		if (!scenarioTimeoutResult.valid) {
+			return scenarioTimeoutResult
+		}
+		const workerCountResult = this.parseOptionalPositiveIntegerArg(args, "--testWorkers", ScenarioWorkerPool.automaticWorkerCount)
+		if (!workerCountResult.valid) {
+			return workerCountResult
+		}
+		return {
+			valid: true,
+			tuning: {
+				testTimeoutMs: testTimeoutResult.value,
+				scenarioTimeoutMs: scenarioTimeoutResult.value,
+				workerCount: workerCountResult.value
+			}
+		}
 	}
 
 	@Spec("Builds a compile diagnostic when --testPath does not match a discovered companion test file.")
@@ -438,6 +498,19 @@ export class LLLTS {
 	@Spec("Checks if the CLI args include the flag (no value expected).")
 	private static hasFlag(args: string[], flag: string): boolean {
 		return args.includes(flag)
+	}
+
+	@Spec("Reads the optional file path that may follow '--timings', leaving console output selected when absent.")
+	private static parseTimingsFilePath(args: string[]): string | null {
+		const flagIndex = args.lastIndexOf("--timings")
+		if (flagIndex < 0 || flagIndex + 1 >= args.length) {
+			return null
+		}
+		const candidate = args[flagIndex + 1].trim()
+		if (candidate.length === 0 || candidate.startsWith("--")) {
+			return null
+		}
+		return candidate
 	}
 
 	@Spec("Logs test and scenario details when --verbose is provided.")
